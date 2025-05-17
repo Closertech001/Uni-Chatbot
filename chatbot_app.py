@@ -37,7 +37,7 @@ uncertainty_phrases = [
     "Possibly: ", "It could be: "
 ]
 
-def find_response(user_input, dataset, question_embeddings, model, threshold=0.6):
+def find_response(user_input, dataset, question_embeddings, model, threshold=0.3):
     user_input = user_input.strip().lower()
 
     greetings = [
@@ -70,7 +70,7 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
     return response
 
 # Streamlit UI
-st.title("🎓 Crescent University Chatbot")
+st.title("🎓 University Q&A Chatbot")
 
 user_input = st.text_input("Ask a question:")
 if user_input:
