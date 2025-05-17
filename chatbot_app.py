@@ -37,13 +37,15 @@ uncertainty_phrases = [
     "Possibly: ", "It could be: "
 ]
 
-def find_response(user_input, dataset, question_embeddings, model, threshold=0.6):
+def find_response(user_input, dataset, question_embeddings, model, threshold=0.5):
+    user_input = user_input.strip().lower()
+
     greetings = [
         "hi", "hello", "hey", "hi there", "greetings", "how are you",
         "how are you doing", "how's it going", "can we talk?",
         "can we have a conversation?", "okay", "i'm fine", "i am fine"
     ]
-    if user_input.lower() in greetings:
+    if user_input in greetings:
         return random.choice([
             "Hello!", "Hi there!", "Hey!", "Greetings!",
             "I'm doing well, thank you!", "Sure pal", "Okay"
