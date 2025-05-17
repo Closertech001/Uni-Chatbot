@@ -1,0 +1,8 @@
+Q: What courses are offered in the 100 level?
+A: The courses include introductory physiology, general biology, chemistry, and physics.
+
+Q: Who is the head of department?
+A: The current head of department is Dr. Jane Doe.
+
+Q: What are the admission requirements?
+A: Five credits in SSCE or equivalent, including English, Maths, Biology, Chemistry, and Physics.
