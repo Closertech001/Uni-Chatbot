@@ -72,7 +72,7 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
 # Streamlit UI
 st.title("🎓 Crescent University Chatbot")
 
-user_input = st.text_input("Ask a question:")
+user_input = st.text_input("Ask a question Crescent University:")
 if user_input:
     response = find_response(user_input, dataset, question_embeddings, model)
     st.write("**Chatbot:**", response)
