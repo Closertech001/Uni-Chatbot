@@ -37,7 +37,7 @@ uncertainty_phrases = [
     "Possibly: ", "It could be: "
 ]
 
-def find_response(user_input, dataset, question_embeddings, model, threshold=0.3):
+def find_response(user_input, dataset, question_embeddings, model, threshold=0.4):
     user_input = user_input.strip().lower()
 
     greetings = [
