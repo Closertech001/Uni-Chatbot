@@ -1,10 +1,10 @@
-# 🎓 University Q&A Chatbot
+# 🎓 Crescent University Chatbot
 
 This is a Streamlit-based chatbot that answers questions about a university program using a custom dataset and sentence-transformer model.
 
 ## 🚀 How to Use
 
-1. Type a question about the university.
+1. Type a question about the Crescent University.
 2. Get instant, intelligent responses from the bot.
 
 ## 🛠 Technologies Used
