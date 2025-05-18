@@ -96,7 +96,7 @@ if st.button("RESPONSE") and user_input.strip() != "":
     feedback_logged_key = f"feedback_logged_{make_key(user_input)}"
     feedback_key = f"feedback_{make_key(user_input)}"
 
-if st.session_state.get(feedback_logged_key, False):
+    if st.session_state.get(feedback_logged_key, False):
 stored_feedback = st.session_state.get(f"{feedback_key}_value", "Yes")
 st.radio(
     "Was this answer helpful?",
