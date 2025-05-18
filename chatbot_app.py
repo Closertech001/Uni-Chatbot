@@ -5,6 +5,9 @@ import torch
 import random
 import os
 
+# 🛠️ Set page configuration FIRST
+st.set_page_config(page_title="Crescent University Chatbot", layout="centered")
+
 # Load model
 @st.cache_resource
 def load_model():
@@ -72,8 +75,6 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
     return response, top_score
 
 # Streamlit UI
-st.set_page_config(page_title="Crescent University Chatbot", layout="centered")
-
 st.title("🎓 Crescent University Chatbot")
 st.markdown("Ask anything about the university. I'm here to help!")
 st.divider()
