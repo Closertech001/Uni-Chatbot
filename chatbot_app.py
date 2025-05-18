@@ -97,11 +97,11 @@ if user_input and not dataset.empty:
     # Store feedback status in session state to avoid duplicate logs
     feedback_logged_key = f"feedback_logged_{hash(user_input)}"
 
-if feedback in ("Yes", "No") and not st.session_state.get(feedback_logged_key, False):
-    with open("feedback_log.csv", "a", encoding='utf-8') as f:
-        f.write(f"{user_input},{response},{feedback}\n")
-    st.session_state[feedback_logged_key] = True
-    st.success("✅ Thanks for your feedback!")
+    if feedback in ("Yes", "No") and not st.session_state.get(feedback_logged_key, False):
+        with open("feedback_log.csv", "a", encoding='utf-8') as f:
+            f.write(f"{user_input},{response},{feedback}\n")
+        st.session_state[feedback_logged_key] = True
+        st.success("✅ Thanks for your feedback!")
 
     # Disable the radio buttons once feedback is submitted
 if st.session_state.get(feedback_logged_key, False):
