@@ -98,16 +98,37 @@ if user_input and not dataset.empty:
 feedback_key = f"feedback_{hash(user_input)}"
 feedback_logged_key = f"feedback_logged_{hash(user_input)}"
 
-if st.session_state.get(feedback_logged_key, False):
-    # Disabled radio with pre-selected value
-    feedback = st.session_state.get(f"{feedback_key}_value", "Yes")  # fallback to "Yes"
-    st.radio("Was this answer helpful?", ("Yes", "No"), index=("Yes", "No").index(feedback), key=feedback_key, disabled=True)
-else:
-    # Enabled radio for new feedback
-    feedback = st.radio("Was this answer helpful?", ("", "Yes", "No"), index=0, key=feedback_key)
-    if feedback in ("Yes", "No"):
-        with open("feedback_log.csv", "a", encoding='utf-8') as f:
-            f.write(f"{user_input},{response},{feedback}\n")
-        st.session_state[feedback_logged_key] = True
-        st.session_state[f"{feedback_key}_value"] = feedback
-        st.success("✅ Thanks for your feedback!")
+if user_input and not dataset.empty:
+    response, top_score = find_response(user_input, dataset, question_embeddings, model)
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.write("**Chatbot:**", response)
+    with col2:
+        st.metric(label="Confidence", value=f"{top_score:.2f}")
+
+    if st.session_state.get(feedback_logged_key, False):
+        # Show disabled radio with previously selected feedback
+        stored_feedback = st.session_state.get(f"{feedback_key}_value", "Yes")
+        st.radio(
+            "Was this answer helpful?",
+            ("Yes", "No"),
+            index=("Yes", "No").index(stored_feedback),
+            key=feedback_key,
+            disabled=True
+        )
+    else:
+        # Show enabled radio to collect new feedback
+        feedback = st.radio(
+            "Was this answer helpful?",
+            ("", "Yes", "No"),
+            index=0,
+            key=feedback_key
+        )
+        if feedback in ("Yes", "No"):
+            with open("feedback_log.csv", "a", encoding='utf-8') as f:
+                f.write(f"{user_input},{response},{feedback}\n")
+            st.session_state[feedback_logged_key] = True
+            st.session_state[f"{feedback_key}_value"] = feedback
+            st.success("✅ Thanks for your feedback!")
+
