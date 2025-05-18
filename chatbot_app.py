@@ -95,14 +95,19 @@ if user_input and not dataset.empty:
     feedback = st.radio("Was this answer helpful?", ("", "Yes", "No"), index=0, key=feedback_key)
 
     # Store feedback status in session state to avoid duplicate logs
-    feedback_logged_key = f"feedback_logged_{hash(user_input)}"
+feedback_key = f"feedback_{hash(user_input)}"
+feedback_logged_key = f"feedback_logged_{hash(user_input)}"
 
-    if feedback in ("Yes", "No") and not st.session_state.get(feedback_logged_key, False):
+if st.session_state.get(feedback_logged_key, False):
+    # Disabled radio with pre-selected value
+    feedback = st.session_state.get(f"{feedback_key}_value", "Yes")  # fallback to "Yes"
+    st.radio("Was this answer helpful?", ("Yes", "No"), index=("Yes", "No").index(feedback), key=feedback_key, disabled=True)
+else:
+    # Enabled radio for new feedback
+    feedback = st.radio("Was this answer helpful?", ("", "Yes", "No"), index=0, key=feedback_key)
+    if feedback in ("Yes", "No"):
         with open("feedback_log.csv", "a", encoding='utf-8') as f:
             f.write(f"{user_input},{response},{feedback}\n")
         st.session_state[feedback_logged_key] = True
+        st.session_state[f"{feedback_key}_value"] = feedback
         st.success("✅ Thanks for your feedback!")
-
-    # Disable the radio buttons once feedback is submitted
-    if st.session_state.get(feedback_logged_key, False):
-        st.radio("Was this answer helpful?", ("Yes", "No"), index=("Yes", "No").index(feedback), key=feedback_key, disabled=True)
