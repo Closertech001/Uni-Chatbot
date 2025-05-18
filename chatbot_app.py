@@ -87,8 +87,4 @@ user_input = st.text_input("Enter your question 💬:")
 if st.button("RESPONSE") and user_input.strip() != "":
     response, top_score = find_response(user_input, dataset, question_embeddings, model)
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.write("**Chatbot:**", response)
-    with col2:
-        st.metric(label="Confidence", value=f"{top_score:.2f}")
+    with st.write("**Chatbot:**", response)
