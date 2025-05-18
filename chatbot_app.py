@@ -94,6 +94,5 @@ if user_input and not dataset.empty:
 
     if feedback:
         with open("feedback_log.csv", "a", encoding='utf-8') as f:
-            f.write(f"{user_input},{response},{feedback}
-")")
+            f.write(f"{user_input},{response},{feedback}\n")
         st.toast("✅ Thanks for your feedback!", icon="💬")
