@@ -92,30 +92,3 @@ if st.button("RESPONSE") and user_input.strip() != "":
         st.write("**Chatbot:**", response)
     with col2:
         st.metric(label="Confidence", value=f"{top_score:.2f}")
-
-    feedback_logged_key = f"feedback_logged_{make_key(user_input)}"
-    feedback_key = f"feedback_{make_key(user_input)}"
-
-    if st.session_state.get(feedback_logged_key, False):
-        stored_feedback = st.session_state.get(f"{feedback_key}_value", "Yes")
-        st.radio(
-            "Was this answer helpful?",
-            ("Yes", "No"),
-            index=("Yes", "No").index(stored_feedback),
-            key=feedback_key,
-            disabled=True,
-        )
-    else:
-        feedback = st.radio(
-            "Was this answer helpful?",
-            ("", "Yes", "No"),
-            index=0,
-            key=feedback_key,
-        )
-
-        if feedback in ("Yes", "No"):
-            with open("feedback_log.csv", "a", encoding='utf-8') as f:
-                f.write(f"{user_input},{response},{feedback}\n")
-            st.session_state[feedback_logged_key] = True
-            st.session_state[f"{feedback_key}_value"] = feedback
-            st.success("✅ Thanks for your feedback!")
