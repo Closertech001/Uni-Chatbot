@@ -97,9 +97,9 @@ if st.button("RESPONSE") and user_input.strip() != "":
     feedback_key = f"feedback_{make_key(user_input)}"
 
 
-        if feedback in ("Yes", "No"):
-            with open("feedback_log.csv", "a", encoding='utf-8') as f:
-                f.write(f"{user_input},{response},{feedback}\n")
-            st.session_state[feedback_logged_key] = True
-            st.session_state[f"{feedback_key}_value"] = feedback
-            st.success("✅ Thanks for your feedback!")
+    if feedback in ("Yes", "No"):
+        with open("feedback_log.csv", "a", encoding='utf-8') as f:
+            f.write(f"{user_input},{response},{feedback}\n")
+        st.session_state[feedback_logged_key] = True
+        st.session_state[f"{feedback_key}_value"] = feedback
+        st.success("✅ Thanks for your feedback!")
