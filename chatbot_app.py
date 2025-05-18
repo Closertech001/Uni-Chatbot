@@ -3,7 +3,7 @@ from sentence_transformers import SentenceTransformer, util
 import pandas as pd
 import torch
 import random
-import os
+import hashlib
 
 # 🛠️ Set page configuration FIRST
 st.set_page_config(page_title="Crescent University Chatbot", layout="centered")
@@ -74,6 +74,9 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
         response = random.choice(uncertainty_phrases) + response
     return response, top_score
 
+def make_key(text):
+    return hashlib.md5(text.encode('utf-8')).hexdigest()
+
 # Streamlit UI
 st.title("🎓 Crescent University Chatbot")
 st.markdown("Ask anything about the university. I'm here to help!")
@@ -81,7 +84,7 @@ st.divider()
 
 user_input = st.text_input("Enter your question 💬:")
 
-if user_input and not dataset.empty:
+if st.button("Ask") and user_input.strip() != "":
     response, top_score = find_response(user_input, dataset, question_embeddings, model)
 
     col1, col2 = st.columns([3, 1])
@@ -90,8 +93,8 @@ if user_input and not dataset.empty:
     with col2:
         st.metric(label="Confidence", value=f"{top_score:.2f}")
 
-    feedback_logged_key = f"feedback_logged_{user_input[:50]}"
-    feedback_key = f"feedback_{user_input[:50]}"
+    feedback_logged_key = f"feedback_logged_{make_key(user_input)}"
+    feedback_key = f"feedback_{make_key(user_input)}"
 
     if st.session_state.get(feedback_logged_key, False):
         stored_feedback = st.session_state.get(f"{feedback_key}_value", "Yes")
@@ -115,4 +118,3 @@ if user_input and not dataset.empty:
             st.session_state[feedback_logged_key] = True
             st.session_state[f"{feedback_key}_value"] = feedback
             st.success("✅ Thanks for your feedback!")
-
