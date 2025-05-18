@@ -90,9 +90,19 @@ if user_input and not dataset.empty:
     with col2:
         st.metric(label="Confidence", value=f"{top_score:.2f}")
 
-    feedback = st.radio("Was this answer helpful?", ("", "Yes", "No"), index=0, key=user_input)
-    
-if feedback in ("Yes", "No"):
-    with open("feedback_log.csv", "a", encoding='utf-8') as f:
-        f.write(f"{user_input},{response},{feedback}\n")
-    st.toast("✅ Thanks for your feedback!", icon="💬")
+    # Use a dynamic key for feedback to avoid conflicts for different questions
+    feedback_key = f"feedback_{hash(user_input)}"
+    feedback = st.radio("Was this answer helpful?", ("", "Yes", "No"), index=0, key=feedback_key)
+
+    # Store feedback status in session state to avoid duplicate logs
+    feedback_logged_key = f"feedback_logged_{hash(user_input)}"
+
+    if feedback in ("Yes", "No") and not st.session_state.get(feedback_logged_key, False):
+        with open("feedback_log.csv", "a", encoding='utf-8') as f:
+            f.write(f"{user_input},{response},{feedback}\n")
+        st.session_state[feedback_logged_key] = True
+        st.success("✅ Thanks for your feedback!")
+
+    # Disable the radio buttons once feedback is submitted
+    if st.session_state.get(feedback_logged_key, False):
+        st.radio("Was this answer helpful?", ("Yes", "No"), index=("Yes" if feedback == "Yes" else "No").index(), key=feedback_key, disabled=True)
