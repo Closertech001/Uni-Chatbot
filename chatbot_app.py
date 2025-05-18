@@ -84,7 +84,7 @@ st.divider()
 
 user_input = st.text_input("Enter your question 💬:")
 
-if st.button("Ask") and user_input.strip() != "":
+if st.button("RESPONSE") and user_input.strip() != "":
     response, top_score = find_response(user_input, dataset, question_embeddings, model)
 
     col1, col2 = st.columns([3, 1])
