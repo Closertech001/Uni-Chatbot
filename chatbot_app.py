@@ -79,7 +79,7 @@ st.title("🎓 Crescent University Chatbot")
 st.markdown("Ask anything about the university. I'm here to help!")
 st.divider()
 
-user_input = st.text_input("💬 Enter your question:")
+user_input = st.text_input("Enter your question 💬:")
 
 if user_input and not dataset.empty:
     response, top_score = find_response(user_input, dataset, question_embeddings, model)
