@@ -92,7 +92,7 @@ if user_input and not dataset.empty:
 
     feedback = st.radio("Was this answer helpful?", ("", "Yes", "No"), index=0, key=user_input)
     
-    if feedback in ("Yes", "No"):
+        if feedback in ("Yes", "No"):
     with open("feedback_log.csv", "a", encoding='utf-8') as f:
         f.write(f"{user_input},{response},{feedback}\n")
     st.toast("✅ Thanks for your feedback!", icon="💬")
