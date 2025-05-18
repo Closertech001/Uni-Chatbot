@@ -104,5 +104,5 @@ if user_input and not dataset.empty:
         st.success("✅ Thanks for your feedback!")
 
     # Disable the radio buttons once feedback is submitted
-if st.session_state.get(feedback_logged_key, False):
-    st.radio("Was this answer helpful?", ("Yes", "No"), index=("Yes", "No").index(feedback), key=feedback_key, disabled=True)
+    if st.session_state.get(feedback_logged_key, False):
+        st.radio("Was this answer helpful?", ("Yes", "No"), index=("Yes", "No").index(feedback), key=feedback_key, disabled=True)
