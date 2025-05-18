@@ -90,9 +90,9 @@ if user_input and not dataset.empty:
     with col2:
         st.metric(label="Confidence", value=f"{top_score:.2f}")
 
-    feedback = st.radio("Was this answer helpful?", ("Yes", "No"), key=user_input)
-
-    if feedback:
-        with open("feedback_log.csv", "a", encoding='utf-8') as f:
-            f.write(f"{user_input},{response},{feedback}\n")
-        st.toast("✅ Thanks for your feedback!", icon="💬")
+    feedback = st.radio("Was this answer helpful?", ("", "Yes", "No"), index=0, key=user_input)
+    
+    if feedback in ("Yes", "No"):
+    with open("feedback_log.csv", "a", encoding='utf-8') as f:
+        f.write(f"{user_input},{response},{feedback}\n")
+    st.toast("✅ Thanks for your feedback!", icon="💬")
