@@ -56,8 +56,6 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
     top_score = torch.max(cos_scores).item()
     top_index = torch.argmax(cos_scores).item()
 
-    st.write(f"🔍 Similarity Score: {top_score:.2f}")  # Debug line
-
     if top_score < threshold:
         return random.choice([
             "I'm sorry, I don't understand your question.",
