@@ -2,3 +2,4 @@ streamlit
 torch
 pandas
 sentence-transformers
+pip install --upgrade streamlit
