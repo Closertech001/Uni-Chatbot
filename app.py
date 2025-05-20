@@ -87,12 +87,12 @@ for message in st.session_state.chat_history:
 # Input from user
 if prompt := st.chat_input("Ask me anything about Crescent University..."):
     # Show user's message
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar=None):
         st.markdown(prompt)
     st.session_state.chat_history.append({"role": "user", "content": prompt})
 
     # Get bot response
     response = find_response(prompt, dataset, question_embeddings, model)
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant",  avatar=None):
         st.markdown(response)
     st.session_state.chat_history.append({"role": "assistant", "content": response})
