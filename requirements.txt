@@ -1,1 +1,4 @@
-pip install --upgrade streamlit torch pandas sentence-transformers
+streamlit
+torch
+pandas
+sentence-transformers
