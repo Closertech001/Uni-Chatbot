@@ -88,9 +88,9 @@ for message in st.session_state.chat_history:
 if prompt := st.chat_input("Ask me anything about Crescent University..."):
     # Show user's message
     with st.chat_message("user", avatar=None):
-        st.markdown(prompt)
+        st.markdown(User)
 
     # Get bot response
     response = find_response(prompt, dataset, question_embeddings, model)
     with st.chat_message("Chatbot",  avatar=None):
-        st.markdown(response)
+        st.markdown(Chatbot)
