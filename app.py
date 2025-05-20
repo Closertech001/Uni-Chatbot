@@ -70,7 +70,27 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
 # Streamlit UI
 st.title("🎓 Crescent University Chatbot")
 
-user_input = st.text_input("Ask a question Crescent University:")
-if user_input:
+# Initialize chat history in session state
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+st.text_input("Ask a question Crescent University:", key="user_input")
+
+if st.session_state.user_input:
+    user_input = st.session_state.user_input
     response = find_response(user_input, dataset, question_embeddings, model)
-    st.write("**Chatbot:**", response)
+    
+    # Add to chat history
+    st.session_state.chat_history.append(("You", user_input))
+    st.session_state.chat_history.append(("Chatbot", response))
+    
+    # Clear the input box after submission
+    st.session_state.user_input = ""
+
+# Display chat history
+for sender, message in st.session_state.chat_history:
+    if sender == "You":
+        st.markdown(f"**You:** {message}")
+    else:
+        st.markdown(f"**Chatbot:** {message}")
+
