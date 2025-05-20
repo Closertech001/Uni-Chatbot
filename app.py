@@ -81,14 +81,14 @@ with st.sidebar:
 
 # Render existing chat messages
 for message in st.session_state.chat_history:
-    with st.chat_message(message["User"]):
+    with st.chat_message(message["user"]):
         st.markdown(message["Chatbot"])
 
 # Input from user
 if prompt := st.chat_input("Ask me anything about Crescent University..."):
     # Show user's message
     with st.chat_message("user", avatar=None):
-        st.markdown(User)
+        st.markdown(user)
 
     # Get bot response
     response = find_response(prompt, dataset, question_embeddings, model)
