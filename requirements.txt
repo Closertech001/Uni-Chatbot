@@ -1,4 +1,3 @@
-
 pip install --upgrade streamlit
 streamlit
 torch
