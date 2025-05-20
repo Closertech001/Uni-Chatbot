@@ -76,16 +76,24 @@ if "chat_history" not in st.session_state:
 
 st.text_input("Ask a question Crescent University:", key="user_input")
 
-if st.session_state.user_input:
-    user_input = st.session_state.user_input
-    response = find_response(user_input, dataset, question_embeddings, model)
-    
-    # Add to chat history
-    st.session_state.chat_history.append(("You", user_input))
-    st.session_state.chat_history.append(("Chatbot", response))
-    
-    # Clear the input box after submission
+# Initialize chat history in session state
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+if "user_input" not in st.session_state:
     st.session_state.user_input = ""
+
+# Function to process input and clear it after submission
+def handle_input():
+    user_input = st.session_state.user_input.strip()
+    if user_input:
+        response = find_response(user_input, dataset, question_embeddings, model)
+        st.session_state.chat_history.append(("You", user_input))
+        st.session_state.chat_history.append(("Chatbot", response))
+        st.session_state.user_input = ""  # Safe reset (within the callback)
+
+# Text input with callback
+st.text_input("Ask a question Crescent University:", key="user_input", on_change=handle_input)
 
 # Display chat history
 for sender, message in st.session_state.chat_history:
