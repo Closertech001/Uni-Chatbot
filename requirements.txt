@@ -1,4 +1,3 @@
-streamlit
 pip install --upgrade streamlit
 torch
 pandas
