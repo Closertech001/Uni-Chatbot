@@ -1,4 +1,3 @@
-
 import streamlit as st
 from sentence_transformers import SentenceTransformer, util
 import pandas as pd
@@ -70,30 +69,29 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
 # Streamlit UI
 st.title("🎓 Crescent University Chatbot")
 
-# Initialize chat history in session state
+# Initialize chat history
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-st.text_input("Ask a question Crescent University:", key="user_input")
+if "input_submitted" not in st.session_state:
+    st.session_state.input_submitted = False
 
-# Initialize chat history in session state
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-if "user_input" not in st.session_state:
-    st.session_state.user_input = ""
-
-# Function to process input and clear it after submission
+# Handle submission
 def handle_input():
+    st.session_state.input_submitted = True
+
+# Show input box
+st.text_input("Ask a question Crescent University:", key="user_input", on_change=handle_input)
+
+# Respond after submission
+if st.session_state.input_submitted:
     user_input = st.session_state.user_input.strip()
     if user_input:
         response = find_response(user_input, dataset, question_embeddings, model)
         st.session_state.chat_history.append(("You", user_input))
         st.session_state.chat_history.append(("Chatbot", response))
-        st.session_state.user_input = ""  # Safe reset (within the callback)
-
-# Text input with callback
-st.text_input("Ask a question Crescent University:", key="user_input", on_change=handle_input)
+    st.session_state.user_input = ""
+    st.session_state.input_submitted = False
 
 # Display chat history
 for sender, message in st.session_state.chat_history:
@@ -101,4 +99,3 @@ for sender, message in st.session_state.chat_history:
         st.markdown(f"**You:** {message}")
     else:
         st.markdown(f"**Chatbot:** {message}")
-
