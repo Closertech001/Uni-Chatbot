@@ -1,5 +1,5 @@
-streamlit
+pip install --upgrade streamlit
 torch
 pandas
 sentence-transformers
-pip install --upgrade streamlit
+
