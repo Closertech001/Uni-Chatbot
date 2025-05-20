@@ -62,7 +62,7 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
     return response
 
 # Initialize
-st.set_page_config(page_title="🎓 Crescent University Chatbot", page_icon="🤖")
+st.set_page_config(page_title="🎓 Crescent University Chatbot", page_icon="🎓")
 st.title("🎓 Crescent University Chatbot")
 
 # Load resources
@@ -93,6 +93,6 @@ if prompt := st.chat_input("Ask me anything about Crescent University..."):
 
     # Get bot response
     response = find_response(prompt, dataset, question_embeddings, model)
-    with st.chat_message("Chatbot"):
+    with st.chat_message("assistant"):
         st.markdown(response)
-    st.session_state.chat_history.append({"role": "Chatbot", "content": response})
+    st.session_state.chat_history.append({"role": "assistant", "content": response})
