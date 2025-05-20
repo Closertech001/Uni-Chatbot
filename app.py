@@ -81,8 +81,8 @@ with st.sidebar:
 
 # Render existing chat messages
 for message in st.session_state.chat_history:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    with st.chat_message(message["User"]):
+        st.markdown(message["Chatbot"])
 
 # Input from user
 if prompt := st.chat_input("Ask me anything about Crescent University..."):
