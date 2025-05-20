@@ -4,12 +4,12 @@ import pandas as pd
 import torch
 import random
 
-# Load model
+# Load the model once and cache it
 @st.cache_resource
 def load_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
-# Load data
+# Load the dataset and parse Q&A
 @st.cache_data
 def load_data():
     qa_pairs = []
@@ -27,6 +27,7 @@ def load_data():
     df = pd.DataFrame(qa_pairs, columns=["question", "response"])
     return df
 
+# Initialize
 model = load_model()
 dataset = load_data()
 question_embeddings = model.encode(dataset['question'].tolist(), convert_to_tensor=True)
@@ -36,6 +37,7 @@ uncertainty_phrases = [
     "Possibly: ", "It could be: "
 ]
 
+# Core response function
 def find_response(user_input, dataset, question_embeddings, model, threshold=0.6):
     user_input = user_input.strip().lower()
 
@@ -67,8 +69,25 @@ def find_response(user_input, dataset, question_embeddings, model, threshold=0.6
     return response
 
 # Streamlit UI
+st.set_page_config(page_title="Crescent University Chatbot", page_icon="🎓")
 st.title("🎓 Crescent University Chatbot")
 
-# Initialize chat history
+# Initialize chat history in session state
 if "chat_history" not in st.session_state:
-    st.session_state.chat_
+    st.session_state["chat_history"] = []
+
+# Text input from user
+user_input = st.text_input("Ask a question Crescent University:")
+
+# If user submits input
+if user_input:
+    response = find_response(user_input, dataset, question_embeddings, model)
+    st.session_state["chat_history"].append(("You", user_input))
+    st.session_state["chat_history"].append(("Chatbot", response))
+
+# Display chat history
+for sender, message in st.session_state["chat_history"]:
+    if sender == "You":
+        st.markdown(f"**🧑 You:** {message}")
+    else:
+        st.markdown(f"**🤖 Chatbot:** {message}")
