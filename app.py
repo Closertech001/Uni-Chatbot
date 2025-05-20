@@ -88,6 +88,6 @@ if user_input:
 # Display chat history
 for sender, message in st.session_state["chat_history"]:
     if sender == "You":
-        st.markdown(f"**🧑 You:** {message}")
+        st.markdown(f"**You:** {message}")
     else:
-        st.markdown(f"**🤖 Chatbot:** {message}")
+        st.markdown(f"**Chatbot:** {message}")
