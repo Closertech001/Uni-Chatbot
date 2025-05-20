@@ -93,6 +93,6 @@ if prompt := st.chat_input("Ask me anything about Crescent University..."):
 
     # Get bot response
     response = find_response(prompt, dataset, question_embeddings, model)
-    with st.chat_message("assistant"):
+    with st.chat_message("Chatbot"):
         st.markdown(response)
-    st.session_state.chat_history.append({"role": "assistant", "content": response})
+    st.session_state.chat_history.append({"role": "Chatbot", "content": response})
