@@ -6,11 +6,8 @@ import json
 import random
 import os
 import pkg_resources
-import pickle
 from symspellpy.symspellpy import SymSpell
-from sentence_transformers import SentenceTransformer
-import faiss
-import numpy as np
+from sentence_transformers import SentenceTransformer, util
 from openai.error import AuthenticationError
 import openai
 
@@ -26,27 +23,9 @@ embedder = SentenceTransformer('multi-qa-MiniLM-L6-cos-v1')
 with open("qa_dataset.json", "r", encoding="utf-8") as f:
     qa_data = json.load(f)
 
-# Prepare corpus
+# Prepare corpus and embeddings
 corpus = [entry["question"] for entry in qa_data]
-
-# Load or create FAISS index and embeddings
-embedding_file = "corpus_embeddings.pkl"
-index_file = "faiss_index.idx"
-
-if os.path.exists(embedding_file) and os.path.exists(index_file):
-    with open(embedding_file, "rb") as f:
-        corpus_embeddings = pickle.load(f)
-    dim = corpus_embeddings.shape[1]
-    index = faiss.read_index(index_file)
-else:
-    corpus_embeddings = embedder.encode(corpus, convert_to_tensor=False, show_progress_bar=True)
-    with open(embedding_file, "wb") as f:
-        pickle.dump(corpus_embeddings, f)
-    corpus_embeddings = np.array(corpus_embeddings).astype("float32")
-    dim = corpus_embeddings.shape[1]
-    index = faiss.IndexFlatL2(dim)
-    index.add(corpus_embeddings)
-    faiss.write_index(index, index_file)
+corpus_embeddings = embedder.encode(corpus, convert_to_tensor=True)
 
 # Set your OpenAI API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
@@ -112,11 +91,18 @@ def preprocess_text(text):
     return text
 
 # --- STEP 2: Friendly tone control ---
-def add_human_tone(raw_response):
-    friendly_prefix = "Of course! 😊 "
-    if raw_response.startswith("Sorry") or "I don't know" in raw_response:
+def add_human_tone(raw_response, tone="Friendly"):
+    if "sorry" in raw_response.lower() or "i don't know" in raw_response.lower():
         return "Hmm, let me double-check that for you. 🤔"
-    return friendly_prefix + raw_response
+
+    if tone == "Friendly":
+        return "Of course! 😊 " + raw_response
+    elif tone == "Professional":
+        return "Certainly. " + raw_response
+    elif tone == "Witty":
+        return "You got it! 🎯 " + raw_response
+    else:
+        return raw_response
 
 # --- STEP 3: Detect small talk or acknowledgment ---
 def detect_smalltalk_or_acknowledge(user_input):
@@ -134,19 +120,22 @@ st.set_page_config(page_title="Crescent UniBot", page_icon="🎓")
 st.title("🎓 Crescent University Chatbot")
 st.markdown("Ask me anything about Crescent University!")
 
+# Personality selector
+selected_tone = st.sidebar.selectbox("Choose Tone Style", ["Friendly", "Professional", "Witty"], index=0)
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# --- System prompt for GPT fallback ---
-system_prompt = """
-You are a helpful, friendly assistant for Crescent University.
-Answer in a conversational tone, like you're chatting with a student.
-If the user is confused, be patient. If they greet you, respond warmly.
-Always encourage them to ask more if needed.
-"""
+# --- System prompt (tone-specific) ---
+def get_system_prompt(tone):
+    if tone == "Professional":
+        return "You are a formal university assistant. Provide factual, clear responses about Crescent University."
+    elif tone == "Witty":
+        return "You are a witty, smart assistant for Crescent University. Respond with humor but stay helpful and informative."
+    return "You are a helpful, friendly assistant for Crescent University. Answer in a conversational tone, like you're chatting with a student."
 
 # --- Handle new input ---
 if prompt := st.chat_input():
@@ -159,23 +148,30 @@ if prompt := st.chat_input():
         st.session_state.messages.append({"role": "assistant", "content": friendly_reply})
     else:
         processed_prompt = preprocess_text(prompt)
-        query_embedding = embedder.encode(processed_prompt, convert_to_tensor=False)
-        D, I = index.search(np.array([query_embedding]).astype("float32"), k=3)
-        top_id = I[0][0]
-        matched_answer = qa_data[top_id]['answer']
-        similarity_score = 1 / (1 + D[0][0])
+        query_embedding = embedder.encode(processed_prompt, convert_to_tensor=True)
+        hits = util.semantic_search(query_embedding, corpus_embeddings, top_k=3)
+        top_hit = hits[0][0]
+        matched_answer = qa_data[top_hit['corpus_id']]['answer']
+        similarity_score = top_hit['score']
 
         if similarity_score < 0.55:
             conversation_history.append({"role": "user", "content": prompt})
             response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "system", "content": system_prompt}] + conversation_history,
+                model="gpt-4",
+                messages=[{"role": "system", "content": get_system_prompt(selected_tone)}] + conversation_history,
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=500,
+                stream=True
             )
-            gpt_reply = response.choices[0].message.content
-            conversation_history.append({"role": "assistant", "content": gpt_reply})
-            final_answer = gpt_reply
+            streamed_text = ""
+            with st.chat_message("assistant"):
+                message_placeholder = st.empty()
+                for chunk in response:
+                    if "content" in chunk.choices[0].delta:
+                        streamed_text += chunk.choices[0].delta.content
+                        message_placeholder.markdown(streamed_text)
+            conversation_history.append({"role": "assistant", "content": streamed_text})
+            final_answer = streamed_text
         else:
             final_answer = matched_answer
             conversation_history.append({"role": "user", "content": prompt})
@@ -184,6 +180,8 @@ if prompt := st.chat_input():
         if len(conversation_history) > 10:
             conversation_history = conversation_history[-10:]
 
-        human_response = add_human_tone(final_answer)
-        st.chat_message("assistant").write(human_response)
+        human_response = add_human_tone(final_answer, tone=selected_tone)
+        if similarity_score >= 0.55:
+            st.chat_message("assistant").write(human_response)
         st.session_state.messages.append({"role": "assistant", "content": human_response})
+
