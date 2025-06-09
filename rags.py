@@ -6,8 +6,11 @@ import json
 import random
 import os
 import pkg_resources
+import pickle
 from symspellpy.symspellpy import SymSpell
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
 from openai.error import AuthenticationError
 import openai
 
@@ -23,9 +26,27 @@ embedder = SentenceTransformer('multi-qa-MiniLM-L6-cos-v1')
 with open("qa_dataset.json", "r", encoding="utf-8") as f:
     qa_data = json.load(f)
 
-# Prepare corpus and embeddings
+# Prepare corpus
 corpus = [entry["question"] for entry in qa_data]
-corpus_embeddings = embedder.encode(corpus, convert_to_tensor=True)
+
+# Load or create FAISS index and embeddings
+embedding_file = "corpus_embeddings.pkl"
+index_file = "faiss_index.idx"
+
+if os.path.exists(embedding_file) and os.path.exists(index_file):
+    with open(embedding_file, "rb") as f:
+        corpus_embeddings = pickle.load(f)
+    dim = corpus_embeddings.shape[1]
+    index = faiss.read_index(index_file)
+else:
+    corpus_embeddings = embedder.encode(corpus, convert_to_tensor=False, show_progress_bar=True)
+    with open(embedding_file, "wb") as f:
+        pickle.dump(corpus_embeddings, f)
+    corpus_embeddings = np.array(corpus_embeddings).astype("float32")
+    dim = corpus_embeddings.shape[1]
+    index = faiss.IndexFlatL2(dim)
+    index.add(corpus_embeddings)
+    faiss.write_index(index, index_file)
 
 # Set your OpenAI API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
@@ -119,7 +140,7 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# --- System prompt for GPT-4 fallback ---
+# --- System prompt for GPT fallback ---
 system_prompt = """
 You are a helpful, friendly assistant for Crescent University.
 Answer in a conversational tone, like you're chatting with a student.
@@ -129,59 +150,40 @@ Always encourage them to ask more if needed.
 
 # --- Handle new input ---
 if prompt := st.chat_input():
-    # Abuse filter
-    if ABUSE_PATTERN.search(prompt):
-        warning = "Let's keep things respectful. I'm here to help with Crescent University queries. 😊"
-        st.chat_message("assistant").write(warning)
-        st.session_state.messages.append({"role": "assistant", "content": warning})
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.chat_message("user").write(prompt)
+
+    friendly_reply = detect_smalltalk_or_acknowledge(prompt)
+    if friendly_reply:
+        st.chat_message("assistant").write(friendly_reply)
+        st.session_state.messages.append({"role": "assistant", "content": friendly_reply})
     else:
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        st.chat_message("user").write(prompt)
+        processed_prompt = preprocess_text(prompt)
+        query_embedding = embedder.encode(processed_prompt, convert_to_tensor=False)
+        D, I = index.search(np.array([query_embedding]).astype("float32"), k=3)
+        top_id = I[0][0]
+        matched_answer = qa_data[top_id]['answer']
+        similarity_score = 1 / (1 + D[0][0])
 
-        friendly_reply = detect_smalltalk_or_acknowledge(prompt)
-        if friendly_reply:
-            st.chat_message("assistant").write(friendly_reply)
-            st.session_state.messages.append({"role": "assistant", "content": friendly_reply})
+        if similarity_score < 0.55:
+            conversation_history.append({"role": "user", "content": prompt})
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "system", "content": system_prompt}] + conversation_history,
+                temperature=0.7,
+                max_tokens=500
+            )
+            gpt_reply = response.choices[0].message.content
+            conversation_history.append({"role": "assistant", "content": gpt_reply})
+            final_answer = gpt_reply
         else:
-            processed_prompt = preprocess_text(prompt)
+            final_answer = matched_answer
+            conversation_history.append({"role": "user", "content": prompt})
+            conversation_history.append({"role": "assistant", "content": final_answer})
 
-            # Show corrected prompt if different
-            if prompt.lower() != processed_prompt.lower():
-                st.info(f"Did you mean: **{processed_prompt}**?")
+        if len(conversation_history) > 10:
+            conversation_history = conversation_history[-10:]
 
-            # Detect department ambiguity
-            mentioned_departments = [dept for dept in DEPARTMENT_NAMES if dept in processed_prompt.lower()]
-            if len(mentioned_departments) > 1:
-                clarification = f"It looks like you mentioned multiple departments: {', '.join(mentioned_departments)}. Could you clarify which one you're asking about? 🤔"
-                st.chat_message("assistant").write(clarification)
-                st.session_state.messages.append({"role": "assistant", "content": clarification})
-            else:
-                query_embedding = embedder.encode(processed_prompt, convert_to_tensor=True)
-                hits = util.semantic_search(query_embedding, corpus_embeddings, top_k=3)
-                top_hit = hits[0][0]
-                matched_answer = qa_data[top_hit['corpus_id']]['answer']
-                similarity_score = top_hit['score']
-
-                if similarity_score < 0.55:
-                    conversation_history.append({"role": "user", "content": prompt})
-                    response = openai.ChatCompletion.create(
-                        model="gpt-4",
-                        messages=[{"role": "system", "content": system_prompt}] + conversation_history,
-                        temperature=0.7,
-                        max_tokens=500
-                    )
-                    gpt_reply = response.choices[0].message.content
-                    conversation_history.append({"role": "assistant", "content": gpt_reply})
-                    final_answer = gpt_reply
-                else:
-                    final_answer = matched_answer
-                    conversation_history.append({"role": "user", "content": prompt})
-                    conversation_history.append({"role": "assistant", "content": final_answer})
-
-                if len(conversation_history) > 10:
-                    conversation_history = conversation_history[-10:]
-
-                human_response = add_human_tone(final_answer)
-                st.chat_message("assistant").write(human_response)
-                st.session_state.messages.append({"role": "assistant", "content": human_response})
-
+        human_response = add_human_tone(final_answer)
+        st.chat_message("assistant").write(human_response)
+        st.session_state.messages.append({"role": "assistant", "content": human_response})
