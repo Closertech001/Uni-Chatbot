@@ -1,79 +1,35 @@
 # --- Imports ---
 import streamlit as st
 import re
-import time
 import json
-import random
-import os
-import pkg_resources
+import time
 from symspellpy.symspellpy import SymSpell
 from sentence_transformers import SentenceTransformer, util
-from openai.error import AuthenticationError
 import openai
 
-# Load SymSpell for spell correction
+# Load SymSpell for spell correction (only once)
 sym_spell = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
 dictionary_path = "frequency_dictionary_en_82_765.txt"
 sym_spell.load_dictionary(dictionary_path, term_index=0, count_index=1)
 
-# Load SentenceTransformer model
+# Load SentenceTransformer model (only once)
 embedder = SentenceTransformer('multi-qa-MiniLM-L6-cos-v1')
 
-# Load QA dataset
+# Load QA dataset (only once)
 with open("qa_dataset.json", "r", encoding="utf-8") as f:
     qa_data = json.load(f)
 
-# Prepare corpus and embeddings
+# Prepare corpus and embeddings (only once)
 corpus = [entry["question"] for entry in qa_data]
 corpus_embeddings = embedder.encode(corpus, convert_to_tensor=True)
 
-# Set your OpenAI API key
+# OpenAI API key from secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Initialize session states
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# Initialize conversation history for fallback GPT
+conversation_history = []
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-if "user_personality" not in st.session_state:
-    st.session_state.user_personality = None
-
-# --- Personality detection ---
-TONE_STYLES = ["friendly", "funny", "sarcastic", "formal", "emotional"]
-
-PERSONALITY_DETECT_PROMPT = (
-    "You are analyzing a user's message to infer their tone or personality.\n"
-    "Return only one of the following categories based on their tone:\n"
-    "friendly, funny, sarcastic, formal, emotional.\n"
-    "User message: "
-)
-
-def detect_personality(user_text):
-    if st.session_state.user_personality:
-        return st.session_state.user_personality
-
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": PERSONALITY_DETECT_PROMPT + user_text}
-            ],
-            temperature=0,
-            max_tokens=5,
-        )
-        personality = response.choices[0].message.content.strip().lower()
-        if personality not in TONE_STYLES:
-            raise ValueError("Invalid personality returned")
-
-        st.session_state.user_personality = personality
-        return personality
-    except Exception:
-        st.session_state.user_personality = "friendly"
-        return "friendly"
-
-# --- STEP 1: Preprocessing (spellcheck + abbreviation expansion) ---
+# --- Preprocessing dicts ---
 ABBREVIATIONS = {
     "u": "you", "r": "are", "ur": "your", "cn": "can", "cud": "could",
     "shud": "should", "wud": "would", "abt": "about", "bcz": "because",
@@ -108,36 +64,34 @@ SYNONYMS = {
     "needed for": "required for", "who handles": "who manages"
 }
 
-ABUSE_WORDS = ["fuck", "shit", "bitch", "nigga", "dumb", "sex"]
-ABUSE_PATTERN = re.compile(r'\b(' + '|'.join(map(re.escape, ABUSE_WORDS)) + r')\b', re.IGNORECASE)
-
-DEPARTMENT_NAMES = [d.lower() for d in [
-    "Computer Science", "Mass Communication", "Law", "Microbiology",
-    "Accounting", "Political Science", "Business Administration", "Business Admin"
-]]
-
+# --- Preprocessing function ---
 def preprocess_text(text):
     text = text.strip()
-    suggestions = sym_spell.lookup_compound(text, max_edit_distance=2)
-    if suggestions:
-        text = suggestions[0].term
 
+    # Skip spellcheck for short inputs (speed up)
+    if len(text.split()) >= 4:
+        suggestions = sym_spell.lookup_compound(text, max_edit_distance=2)
+        if suggestions:
+            text = suggestions[0].term
+
+    # Replace abbreviations
     for abbr, full in ABBREVIATIONS.items():
         text = re.sub(rf"\\b{abbr}\\b", full, text, flags=re.IGNORECASE)
 
+    # Replace synonyms
     for word, synonym in SYNONYMS.items():
         text = re.sub(rf"\\b{word}\\b", synonym, text, flags=re.IGNORECASE)
 
     return text
 
-# --- STEP 2: Friendly tone control ---
+# --- Friendly tone control ---
 def add_human_tone(raw_response):
     friendly_prefix = "Of course! 😊 "
-    if raw_response.startswith("Sorry") or "I don't know" in raw_response:
+    if raw_response.lower().startswith("sorry") or "i don't know" in raw_response.lower():
         return "Hmm, let me double-check that for you. 🤔"
     return friendly_prefix + raw_response
 
-# --- STEP 3: Detect small talk or acknowledgment ---
+# --- Small talk / acknowledgment ---
 def detect_smalltalk_or_acknowledge(user_input):
     input_lower = user_input.lower()
     if "thank" in input_lower:
@@ -148,16 +102,20 @@ def detect_smalltalk_or_acknowledge(user_input):
         return "Alright, take your time! I'm ready whenever you are. 😊"
     return None
 
-# --- Streamlit UI ---
+# --- Streamlit UI setup ---
 st.set_page_config(page_title="Crescent UniBot", page_icon="🎓")
 st.title("🎓 Crescent University Chatbot")
 st.markdown("Ask me anything about Crescent University!")
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Render previous messages
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# --- System prompt for GPT-4 fallback ---
-system_prompt_base = """
+# --- System prompt for GPT fallback ---
+system_prompt = """
 You are a helpful, friendly assistant for Crescent University.
 Answer in a conversational tone, like you're chatting with a student.
 If the user is confused, be patient. If they greet you, respond warmly.
@@ -182,25 +140,27 @@ if prompt := st.chat_input():
         matched_answer = qa_data[top_hit['corpus_id']]['answer']
         similarity_score = top_hit['score']
 
-        if similarity_score < 0.55:
-            personality = detect_personality(prompt)
-            system_tone_prompt = system_prompt_base + f"\nYour tone should be {personality}."
+        if similarity_score < 0.45:  # fallback threshold reduced for speed & accuracy
+            conversation_history.append({"role": "user", "content": prompt})
 
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
-
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[{"role": "system", "content": system_tone_prompt}] + st.session_state.chat_history[-10:],
-                temperature=0.7,
-                max_tokens=500
-            )
+            with st.spinner("Thinking... 🤔"):
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",  # Faster fallback model
+                    messages=[{"role": "system", "content": system_prompt}] + conversation_history,
+                    temperature=0.7,
+                    max_tokens=500
+                )
             gpt_reply = response.choices[0].message.content
+            conversation_history.append({"role": "assistant", "content": gpt_reply})
             final_answer = gpt_reply
-            st.session_state.chat_history.append({"role": "assistant", "content": final_answer})
         else:
             final_answer = matched_answer
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
-            st.session_state.chat_history.append({"role": "assistant", "content": final_answer})
+            conversation_history.append({"role": "user", "content": prompt})
+            conversation_history.append({"role": "assistant", "content": final_answer})
+
+        # Limit conversation history size for memory/performance
+        if len(conversation_history) > 6:
+            conversation_history = conversation_history[-6:]
 
         human_response = add_human_tone(final_answer)
         st.chat_message("assistant").write(human_response)
