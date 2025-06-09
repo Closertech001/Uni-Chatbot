@@ -1,14 +1,10 @@
 # --- Imports ---
 import streamlit as st
 import re
-import time
 import json
-import random
-import os
-import pkg_resources
+import time
 from symspellpy.symspellpy import SymSpell
 from sentence_transformers import SentenceTransformer, util
-from openai.error import AuthenticationError
 import openai
 
 # Load SymSpell for spell correction
@@ -27,13 +23,13 @@ with open("qa_dataset.json", "r", encoding="utf-8") as f:
 corpus = [entry["question"] for entry in qa_data]
 corpus_embeddings = embedder.encode(corpus, convert_to_tensor=True)
 
-# Set your OpenAI API key
+# Set OpenAI API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # Initialize conversation history
 conversation_history = []
 
-# --- STEP 1: Preprocessing (spellcheck + abbreviation expansion) ---
+# --- Constants for preprocessing ---
 ABBREVIATIONS = {
     "u": "you", "r": "are", "ur": "your", "cn": "can", "cud": "could",
     "shud": "should", "wud": "would", "abt": "about", "bcz": "because",
@@ -68,14 +64,7 @@ SYNONYMS = {
     "needed for": "required for", "who handles": "who manages"
 }
 
-ABUSE_WORDS = ["fuck", "shit", "bitch", "nigga", "dumb", "sex"]
-ABUSE_PATTERN = re.compile(r'\b(' + '|'.join(map(re.escape, ABUSE_WORDS)) + r')\b', re.IGNORECASE)
-
-DEPARTMENT_NAMES = [d.lower() for d in [
-    "Computer Science", "Mass Communication", "Law", "Microbiology",
-    "Accounting", "Political Science", "Business Administration", "Business Admin"
-]]
-
+# --- Preprocessing function ---
 def preprocess_text(text):
     text = text.strip()
     suggestions = sym_spell.lookup_compound(text, max_edit_distance=2)
@@ -90,18 +79,7 @@ def preprocess_text(text):
 
     return text
 
-# --- Tone prompt mappings ---
-TONE_PROMPTS = {
-    "Friendly": "You are a helpful, friendly assistant for Crescent University. Use a conversational tone, respond warmly and politely. Add emojis sparingly to lighten the tone.",
-    "Professional": "You are a knowledgeable and concise assistant. Keep responses formal, clear, and to the point. No emojis.",
-    "Witty": "You are clever, witty, and love using humor and puns. Make learning fun without being sarcastic. Use playful emojis when suitable.",
-    "Empathetic": "You are warm, patient, and understanding. Provide reassurance and clarity, especially when users seem confused or overwhelmed. Add comforting emojis like 🤗 or 💡.",
-    "Encouraging": "You are upbeat and motivating. Cheer students on, praise curiosity, and nudge them to explore further. Sprinkle emojis like 🎉👍.",
-    "Direct": "You are efficient and focused. Answer in as few words as possible, avoid filler, and don’t use emojis unless asked.",
-    "Playful": "You’re quirky and imaginative. Respond like a cheerful buddy with fun expressions and cute emoji flair 🎈🤓🐱."
-}
-
-# --- STEP 3: Detect small talk or acknowledgment ---
+# --- Detect smalltalk or acknowledgements ---
 def detect_smalltalk_or_acknowledge(user_input):
     input_lower = user_input.lower()
     if "thank" in input_lower:
@@ -112,16 +90,33 @@ def detect_smalltalk_or_acknowledge(user_input):
         return "Alright, take your time! I'm ready whenever you are. 😊"
     return None
 
-# --- Streamlit UI ---
+# --- Personality detection prompt ---
+PERSONALITY_DETECT_PROMPT = """
+Analyze the user's message and identify their mood or personality from the following categories:
+- friendly
+- formal
+- curious
+- impatient
+- humorous
+- confused
+Respond with only one word representing the detected personality.
+User message:
+"""
+
+# --- Tone styles mapping ---
+TONE_STYLES = {
+    "friendly": "You are a helpful and friendly assistant. Use a warm and encouraging tone with emojis where appropriate.",
+    "formal": "You are a professional assistant. Use a polite and formal tone.",
+    "curious": "You are an engaging assistant, showing curiosity and enthusiasm in your responses.",
+    "impatient": "You are a direct and concise assistant, giving answers quickly and efficiently.",
+    "humorous": "You are a witty and light-hearted assistant. Use humor and casual language.",
+    "confused": "You are a patient and gentle assistant, helping to clarify and explain carefully."
+}
+
+# --- Streamlit UI setup ---
 st.set_page_config(page_title="Crescent UniBot", page_icon="🎓")
 st.title("🎓 Crescent University Chatbot")
 st.markdown("Ask me anything about Crescent University!")
-
-# --- Sidebar tone selector ---
-tone = st.sidebar.selectbox(
-    "Choose Assistant Personality",
-    list(TONE_PROMPTS.keys())
-)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -129,51 +124,96 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# --- Handle new input ---
+# --- Helper function: detect personality ---
+def detect_personality(user_text):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": PERSONALITY_DETECT_PROMPT + user_text}],
+            temperature=0,
+            max_tokens=5,
+        )
+        personality = response.choices[0].message.content.strip().lower()
+        if personality not in TONE_STYLES:
+            personality = "friendly"
+        return personality
+    except Exception:
+        # Fallback
+        return "friendly"
+
+# --- Handle new user input ---
 if prompt := st.chat_input():
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
 
+    # Smalltalk or quick replies
     friendly_reply = detect_smalltalk_or_acknowledge(prompt)
     if friendly_reply:
         st.chat_message("assistant").write(friendly_reply)
         st.session_state.messages.append({"role": "assistant", "content": friendly_reply})
     else:
         processed_prompt = preprocess_text(prompt)
+
+        # Semantic search
         query_embedding = embedder.encode(processed_prompt, convert_to_tensor=True)
         hits = util.semantic_search(query_embedding, corpus_embeddings, top_k=3)
         top_hit = hits[0][0]
         matched_answer = qa_data[top_hit['corpus_id']]['answer']
         similarity_score = top_hit['score']
 
-        system_prompt = TONE_PROMPTS.get(tone, TONE_PROMPTS["Friendly"])
+        # Detect personality dynamically from user message
+        personality = detect_personality(prompt)
+        system_tone_prompt = TONE_STYLES[personality]
+
+        # Prepare conversation for GPT fallback or direct answer
+        conversation_history.append({"role": "user", "content": prompt})
 
         if similarity_score < 0.55:
-            conversation_history.append({"role": "user", "content": prompt})
-            response = openai.ChatCompletion.create(
+            # GPT fallback with dynamic tone
+            messages = [
+                {"role": "system", "content": system_tone_prompt},
+                *conversation_history[-10:]
+            ]
+            # Stream response from GPT
+            response_stream = openai.ChatCompletion.create(
                 model="gpt-4",
-                messages=[{"role": "system", "content": system_prompt}] + conversation_history,
+                messages=messages,
                 temperature=0.7,
                 max_tokens=500,
-                stream=True
+                stream=True,
             )
-            gpt_reply = ""
-            with st.chat_message("assistant"):
-                message_placeholder = st.empty()
-                for chunk in response:
-                    if "choices" in chunk:
-                        delta = chunk.choices[0].delta.get("content", "")
-                        gpt_reply += delta
-                        message_placeholder.markdown(gpt_reply + "▌")
-                message_placeholder.markdown(gpt_reply)
-            conversation_history.append({"role": "assistant", "content": gpt_reply})
-            st.session_state.messages.append({"role": "assistant", "content": gpt_reply})
-        else:
-            final_answer = matched_answer
-            conversation_history.append({"role": "user", "content": prompt})
-            conversation_history.append({"role": "assistant", "content": final_answer})
-            st.chat_message("assistant").write(final_answer)
-            st.session_state.messages.append({"role": "assistant", "content": final_answer})
+            collected_chunks = []
+            collected_messages = []
+            full_reply = ""
+            assistant_message = st.chat_message("assistant")
+            partial_response = ""
 
+            for chunk in response_stream:
+                chunk_message = chunk['choices'][0]['delta'].get('content', '')
+                partial_response += chunk_message
+                assistant_message.write(partial_response)
+                full_reply = partial_response
+            conversation_history.append({"role": "assistant", "content": full_reply})
+            final_answer = full_reply
+        else:
+            # Use matched answer, add human tone prefix based on personality
+            tone_prefixes = {
+                "friendly": "Of course! 😊 ",
+                "formal": "",
+                "curious": "Great question! 🤔 ",
+                "impatient": "",
+                "humorous": "Haha, here you go! 😄 ",
+                "confused": "Let me clarify that for you. 🤓 "
+            }
+            prefix = tone_prefixes.get(personality, "Of course! 😊 ")
+            final_answer = prefix + matched_answer
+            conversation_history.append({"role": "assistant", "content": final_answer})
+
+        # Limit conversation history size
         if len(conversation_history) > 10:
             conversation_history = conversation_history[-10:]
+
+        # Display final response if not streamed already
+        if similarity_score >= 0.55:
+            st.chat_message("assistant").write(final_answer)
+            st.session_state.messages.append({"role": "assistant", "content": final_answer})
