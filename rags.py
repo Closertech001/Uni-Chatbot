@@ -129,84 +129,59 @@ Always encourage them to ask more if needed.
 
 # --- Handle new input ---
 if prompt := st.chat_input():
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
-
-    friendly_reply = detect_smalltalk_or_acknowledge(prompt)
-    if friendly_reply:
-        st.chat_message("assistant").write(friendly_reply)
-        st.session_state.messages.append({"role": "assistant", "content": friendly_reply})
+    # Abuse filter
+    if ABUSE_PATTERN.search(prompt):
+        warning = "Let's keep things respectful. I'm here to help with Crescent University queries. 😊"
+        st.chat_message("assistant").write(warning)
+        st.session_state.messages.append({"role": "assistant", "content": warning})
     else:
-        processed_prompt = preprocess_text(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.chat_message("user").write(prompt)
 
-        query_embedding = embedder.encode(processed_prompt, convert_to_tensor=True)
-        hits = util.semantic_search(query_embedding, corpus_embeddings, top_k=3)
-        top_hit = hits[0][0]
-        matched_answer = qa_data[top_hit['corpus_id']]['answer']
-        similarity_score = top_hit['score']
-
-        if similarity_score < 0.55:
-            conversation_history.append({"role": "user", "content": prompt})
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
-                messages=[{"role": "system", "content": system_prompt}] + conversation_history,
-                temperature=0.7,
-                max_tokens=500
-            )
-            gpt_reply = response.choices[0].message.content
-            conversation_history.append({"role": "assistant", "content": gpt_reply})
-            final_answer = gpt_reply
+        friendly_reply = detect_smalltalk_or_acknowledge(prompt)
+        if friendly_reply:
+            st.chat_message("assistant").write(friendly_reply)
+            st.session_state.messages.append({"role": "assistant", "content": friendly_reply})
         else:
-            final_answer = matched_answer
-            conversation_history.append({"role": "user", "content": prompt})
-            conversation_history.append({"role": "assistant", "content": final_answer})
+            processed_prompt = preprocess_text(prompt)
 
-        if len(conversation_history) > 10:
-            conversation_history = conversation_history[-10:]
+            # Show corrected prompt if different
+            if prompt.lower() != processed_prompt.lower():
+                st.info(f"Did you mean: **{processed_prompt}**?")
 
-        human_response = add_human_tone(final_answer)
-        st.chat_message("assistant").write(human_response)
-        st.session_state.messages.append({"role": "assistant", "content": human_response})# --- Main App ---
-def main():
-    st.set_page_config(page_title="Crescent University Chatbot", page_icon="🎓")
-    st.title("🎓 Crescent University Chatbot")
-    st.markdown("Ask me anything about your department, courses, or life at the university.")
+            # Detect department ambiguity
+            mentioned_departments = [dept for dept in DEPARTMENT_NAMES if dept in processed_prompt.lower()]
+            if len(mentioned_departments) > 1:
+                clarification = f"It looks like you mentioned multiple departments: {', '.join(mentioned_departments)}. Could you clarify which one you're asking about? 🤔"
+                st.chat_message("assistant").write(clarification)
+                st.session_state.messages.append({"role": "assistant", "content": clarification})
+            else:
+                query_embedding = embedder.encode(processed_prompt, convert_to_tensor=True)
+                hits = util.semantic_search(query_embedding, corpus_embeddings, top_k=3)
+                top_hit = hits[0][0]
+                matched_answer = qa_data[top_hit['corpus_id']]['answer']
+                similarity_score = top_hit['score']
 
-    if "embed_model" not in st.session_state:
-        embed_model, sym_spell, dataset, q_embeds = load_all_data()
-        st.session_state.embed_model = embed_model
-        st.session_state.sym_spell = sym_spell
-        st.session_state.dataset = dataset
-        st.session_state.q_embeds = q_embeds
-        st.session_state.messages = [{"role": "assistant", "content": "Hi there! I'm here to help you with anything Crescent University related. What would you like to know?"}]
-        st.session_state.memory = {"department": None, "topic": None, "level": None}
+                if similarity_score < 0.55:
+                    conversation_history.append({"role": "user", "content": prompt})
+                    response = openai.ChatCompletion.create(
+                        model="gpt-4",
+                        messages=[{"role": "system", "content": system_prompt}] + conversation_history,
+                        temperature=0.7,
+                        max_tokens=500
+                    )
+                    gpt_reply = response.choices[0].message.content
+                    conversation_history.append({"role": "assistant", "content": gpt_reply})
+                    final_answer = gpt_reply
+                else:
+                    final_answer = matched_answer
+                    conversation_history.append({"role": "user", "content": prompt})
+                    conversation_history.append({"role": "assistant", "content": final_answer})
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+                if len(conversation_history) > 10:
+                    conversation_history = conversation_history[-10:]
 
-    user_input = st.chat_input("What's on your mind?")
-    if user_input:
-        norm_input = normalize_text(user_input, st.session_state.sym_spell)
-        if ABUSE_PATTERN.search(norm_input):
-            response = "Let’s keep it respectful, please. I’m here to help."
-        elif is_greeting(norm_input):
-            response = get_random_greeting_response()
-        elif is_farewell(norm_input):
-            response = get_random_farewell_response()
-        else:
-            st.session_state.memory = update_chat_memory(norm_input, st.session_state.memory)
-            resolved_input = resolve_follow_up(user_input, st.session_state.memory)
-            response, _ = retrieve_or_gpt(resolved_input, st.session_state.dataset, st.session_state.q_embeds, st.session_state.embed_model, st.session_state.messages, st.session_state.memory)
-        st.chat_message("user").markdown(user_input)
-        with st.chat_message("assistant"):
-            placeholder = st.empty()
-            placeholder.markdown("_Typing..._")
-            time.sleep(1.2)
-            placeholder.markdown(response)
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        log_to_long_term_memory(user_input, response)
+                human_response = add_human_tone(final_answer)
+                st.chat_message("assistant").write(human_response)
+                st.session_state.messages.append({"role": "assistant", "content": human_response})
 
-if __name__ == "__main__":
-    main()
