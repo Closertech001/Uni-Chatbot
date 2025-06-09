@@ -11,7 +11,29 @@ from sentence_transformers import SentenceTransformer, util
 from openai.error import AuthenticationError
 import openai
 
-# --- Constants ---
+# Load SymSpell for spell correction
+sym_spell = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
+dictionary_path = "frequency_dictionary_en_82_765.txt"
+sym_spell.load_dictionary(dictionary_path, term_index=0, count_index=1)
+
+# Load SentenceTransformer model
+embedder = SentenceTransformer('multi-qa-MiniLM-L6-cos-v1')
+
+# Load QA dataset
+with open("qa_dataset.json", "r", encoding="utf-8") as f:
+    qa_data = json.load(f)
+
+# Prepare corpus and embeddings
+corpus = [entry["question"] for entry in qa_data]
+corpus_embeddings = embedder.encode(corpus, convert_to_tensor=True)
+
+# Set your OpenAI API key
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# Initialize conversation history
+conversation_history = []
+
+# --- STEP 1: Preprocessing (spellcheck + abbreviation expansion) ---
 ABBREVIATIONS = {
     "u": "you", "r": "are", "ur": "your", "cn": "can", "cud": "could",
     "shud": "should", "wud": "would", "abt": "about", "bcz": "because",
@@ -24,8 +46,8 @@ ABBREVIATIONS = {
     "app": "application", "req": "requirement", "nd": "national diploma",
     "a-level": "advanced level", "alevel": "advanced level", "2nd": "second",
     "1st": "first", "nxt": "next", "prev": "previous", "exp": "experience",
-    "CSC": "department of Computer Science", "Mass comm": "department of Mass Communication",
-    "law": "department of law", "Acc": "department of Accounting"
+    "csc": "department of computer science", "mass comm": "department of mass communication",
+    "law": "department of law", "acc": "department of accounting"
 }
 
 SYNONYMS = {
@@ -54,151 +76,97 @@ DEPARTMENT_NAMES = [d.lower() for d in [
     "Accounting", "Political Science", "Business Administration", "Business Admin"
 ]]
 
-# --- OpenAI API Key ---
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
-# --- Cache Loaders ---
-@st.cache_resource
-def init_symspell():
-    sym_spell = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
-    dict_path = pkg_resources.resource_filename("symspellpy", "frequency_dictionary_en_82_765.txt")
-    sym_spell.load_dictionary(dict_path, term_index=0, count_index=1)
-    return sym_spell
-
-@st.cache_resource
-def load_embedding_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
-
-@st.cache_resource
-def load_dataset():
-    with open("qa_dataset.json", "r") as f:
-        return json.load(f)
-
-@st.cache_resource
-def load_all_data():
-    embed_model = load_embedding_model()
-    sym_spell = init_symspell()
-    dataset = load_dataset()
-    questions = [item["question"] for item in dataset]
-    q_embeds = embed_model.encode(questions, convert_to_tensor=True, normalize_embeddings=True)
-    return embed_model, sym_spell, dataset, q_embeds
-
-# --- Normalization ---
-def normalize_text(text, sym_spell):
-    text = text.lower()
+def preprocess_text(text):
+    text = text.strip()
     suggestions = sym_spell.lookup_compound(text, max_edit_distance=2)
-    corrected = suggestions[0].term if suggestions else text
+    if suggestions:
+        text = suggestions[0].term
+
     for abbr, full in ABBREVIATIONS.items():
-        corrected = re.sub(rf'\b{re.escape(abbr)}\b', full, corrected)
-    for syn, rep in SYNONYMS.items():
-        corrected = re.sub(rf'\b{re.escape(syn)}\b', rep, corrected)
-    return corrected
+        text = re.sub(rf"\\b{abbr}\\b", full, text, flags=re.IGNORECASE)
 
-# --- Greetings / Farewell ---
-def is_greeting(text):
-    return text.lower().strip() in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]
+    for word, synonym in SYNONYMS.items():
+        text = re.sub(rf"\\b{word}\\b", synonym, text, flags=re.IGNORECASE)
 
-def get_random_greeting_response():
-    return random.choice([
-        "Hey there! How can I help you today?",
-        "Hi! Need help with something about Crescent University?",
-        "Hello! Feel free to ask me anything you’re curious about.",
-        "Hi there! I’m here to help you out.",
-        "Hey! What would you like to know today?"
-    ])
+    return text
 
-def is_farewell(text):
-    return text.lower().strip() in ["bye", "goodbye", "see you", "later", "farewell", "cya", "peace", "exit"]
+# --- STEP 2: Friendly tone control ---
+def add_human_tone(raw_response):
+    friendly_prefix = "Of course! 😊 "
+    if raw_response.startswith("Sorry") or "I don't know" in raw_response:
+        return "Hmm, let me double-check that for you. 🤔"
+    return friendly_prefix + raw_response
 
-def get_random_farewell_response():
-    return random.choice([
-        "Alright, take care!",
-        "See you around! Have a good one.",
-        "Bye for now! Let me know if you need more help later.",
-        "Catch you later! Feel free to come back any time.",
-        "Take care! I’ll be here whenever you need me."
-    ])
+# --- STEP 3: Detect small talk or acknowledgment ---
+def detect_smalltalk_or_acknowledge(user_input):
+    input_lower = user_input.lower()
+    if "thank" in input_lower:
+        return "You're welcome! Let me know if you have more questions. 😊"
+    if "hello" in input_lower or "hi" in input_lower:
+        return "Hi there! I'm here to help with anything about Crescent University. What would you like to know?"
+    if "not asked" in input_lower:
+        return "Alright, take your time! I'm ready whenever you are. 😊"
+    return None
 
-# --- Memory ---
-def update_chat_memory(norm_input, memory):
-    for dept in DEPARTMENT_NAMES:
-        if re.search(rf"\b{re.escape(dept)}\b", norm_input):
-            memory["department"] = dept.title()
-            break
-    dep_match = re.search(r"department of ([a-zA-Z &]+)", norm_input)
-    if dep_match:
-        memory["department"] = dep_match.group(1).title()
-    lvl_match = re.search(r"(100|200|300|400|500)\s*level", norm_input)
-    if lvl_match:
-        memory["level"] = lvl_match.group(1)
-    topics = [
-        ("admission", ["admission", "apply", "jamb", "requirement"]),
-        ("fees", ["fee", "tuition", "cost", "school fees"]),
-        ("courses", ["course", "subject", "unit", "curriculum", "study"]),
-        ("accommodation", ["accommodation", "hostel", "reside", "lodging"]),
-        ("graduation", ["graduation", "convocation"]),
-        ("exam", ["exam", "test", "cgpa", "grade"]),
-        ("scholarship", ["scholarship", "aid", "bursary"]),
-        ("dress code", ["dress code", "uniform", "appearance"])
-    ]
-    for topic, kws in topics:
-        if any(kw in norm_input for kw in kws):
-            memory["topic"] = topic
-            break
-    return memory
+# --- Streamlit UI ---
+st.set_page_config(page_title="Crescent UniBot", page_icon="🎓")
+st.title("🎓 Crescent University Chatbot")
+st.markdown("Ask me anything about Crescent University!")
 
-def resolve_follow_up(raw_input, memory):
-    text = raw_input.strip().lower()
-    if m := re.match(r"what about (\d{3}) level", text):
-        if memory.get("department"):
-            return f"What are the {m.group(1)} level courses in {memory['department']}?"
-    if text.startswith("what about") and memory.get("level") and memory.get("department"):
-        return f"What are the {memory['level']} level courses in {memory['department']}?"
-    if m2 := re.match(r"do they also .* in ([a-zA-Z &]+)\?", text):
-        if memory.get("topic"):
-            return f"Do they also offer {memory['topic']} in {m2.group(1).title()}?"
-    if m3 := re.match(r"how about .* for ([a-zA-Z &]+)\?", text):
-        if memory.get("topic"):
-            return f"Do they also offer {memory['topic']} in {m3.group(1).title()}?"
-    return raw_input
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# --- Retrieval / GPT Fallback ---
-def build_contextual_prompt(messages, memory):
-    mem = f"- Department: {memory.get('department') or 'unspecified'}\n- Level: {memory.get('level') or 'unspecified'}\n- Topic: {memory.get('topic') or 'unspecified'}"
-    return [{"role": "system", "content": "You are a friendly and helpful assistant for Crescent University. Respond like you're talking to a friend.\n" + mem}] + messages[-12:]
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
-def retrieve_or_gpt(user_input, dataset, q_embeds, embed_model, messages, memory):
-    for item in dataset:
-        if user_input.strip().lower() == item["question"].strip().lower():
-            return item["answer"], 1.0
-    user_embed = embed_model.encode(user_input, convert_to_tensor=True, normalize_embeddings=True)
-    scores = util.pytorch_cos_sim(user_embed, q_embeds)[0]
-    best_idx = scores.argmax().item()
-    top_score = float(scores[best_idx])
-    if top_score >= 0.60:
-        return dataset[best_idx]["answer"], top_score
-    if openai.api_key:
-        try:
-            prompt = build_contextual_prompt(messages, memory)
-            prompt.append({"role": "user", "content": user_input})
-            gpt_response = openai.ChatCompletion.create(
+# --- System prompt for GPT-4 fallback ---
+system_prompt = """
+You are a helpful, friendly assistant for Crescent University.
+Answer in a conversational tone, like you're chatting with a student.
+If the user is confused, be patient. If they greet you, respond warmly.
+Always encourage them to ask more if needed.
+"""
+
+# --- Handle new input ---
+if prompt := st.chat_input():
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.chat_message("user").write(prompt)
+
+    friendly_reply = detect_smalltalk_or_acknowledge(prompt)
+    if friendly_reply:
+        st.chat_message("assistant").write(friendly_reply)
+        st.session_state.messages.append({"role": "assistant", "content": friendly_reply})
+    else:
+        processed_prompt = preprocess_text(prompt)
+
+        query_embedding = embedder.encode(processed_prompt, convert_to_tensor=True)
+        hits = util.semantic_search(query_embedding, corpus_embeddings, top_k=3)
+        top_hit = hits[0][0]
+        matched_answer = qa_data[top_hit['corpus_id']]['answer']
+        similarity_score = top_hit['score']
+
+        if similarity_score < 0.55:
+            conversation_history.append({"role": "user", "content": prompt})
+            response = openai.ChatCompletion.create(
                 model="gpt-4",
-                messages=prompt,
-                temperature=0.6,
+                messages=[{"role": "system", "content": system_prompt}] + conversation_history,
+                temperature=0.7,
+                max_tokens=500
             )
-            return gpt_response.choices[0].message.content.strip(), top_score
-        except:
-            return "Hmm, I had trouble finding the answer. Want to try rephrasing that?", top_score
-    return "I’m not quite sure what you mean. Could you try asking in a different way?", top_score
+            gpt_reply = response.choices[0].message.content
+            conversation_history.append({"role": "assistant", "content": gpt_reply})
+            final_answer = gpt_reply
+        else:
+            final_answer = matched_answer
+            conversation_history.append({"role": "user", "content": prompt})
+            conversation_history.append({"role": "assistant", "content": final_answer})
 
-# --- Logging ---
-def log_to_long_term_memory(user_input, assistant_response):
-    os.makedirs("logs", exist_ok=True)
-    entry = {"user": user_input, "assistant": assistant_response, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")}
-    with open("logs/chat_history_log.json", "a") as f:
-        f.write(json.dumps(entry) + "\n")
+        if len(conversation_history) > 10:
+            conversation_history = conversation_history[-10:]
 
-# --- Main App ---
+        human_response = add_human_tone(final_answer)
+        st.chat_message("assistant").write(human_response)
+        st.session_state.messages.append({"role": "assistant", "content": human_response})# --- Main App ---
 def main():
     st.set_page_config(page_title="Crescent University Chatbot", page_icon="🎓")
     st.title("🎓 Crescent University Chatbot")
