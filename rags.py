@@ -90,19 +90,16 @@ def preprocess_text(text):
 
     return text
 
-# --- STEP 2: Friendly tone control ---
-def add_human_tone(raw_response, tone="Friendly"):
-    if "sorry" in raw_response.lower() or "i don't know" in raw_response.lower():
-        return "Hmm, let me double-check that for you. 🤔"
-
-    if tone == "Friendly":
-        return "Of course! 😊 " + raw_response
-    elif tone == "Professional":
-        return "Certainly. " + raw_response
-    elif tone == "Witty":
-        return "You got it! 🎯 " + raw_response
-    else:
-        return raw_response
+# --- Tone prompt mappings ---
+TONE_PROMPTS = {
+    "Friendly": "You are a helpful, friendly assistant for Crescent University. Use a conversational tone, respond warmly and politely. Add emojis sparingly to lighten the tone.",
+    "Professional": "You are a knowledgeable and concise assistant. Keep responses formal, clear, and to the point. No emojis.",
+    "Witty": "You are clever, witty, and love using humor and puns. Make learning fun without being sarcastic. Use playful emojis when suitable.",
+    "Empathetic": "You are warm, patient, and understanding. Provide reassurance and clarity, especially when users seem confused or overwhelmed. Add comforting emojis like 🤗 or 💡.",
+    "Encouraging": "You are upbeat and motivating. Cheer students on, praise curiosity, and nudge them to explore further. Sprinkle emojis like 🎉👍.",
+    "Direct": "You are efficient and focused. Answer in as few words as possible, avoid filler, and don’t use emojis unless asked.",
+    "Playful": "You’re quirky and imaginative. Respond like a cheerful buddy with fun expressions and cute emoji flair 🎈🤓🐱."
+}
 
 # --- STEP 3: Detect small talk or acknowledgment ---
 def detect_smalltalk_or_acknowledge(user_input):
@@ -120,22 +117,17 @@ st.set_page_config(page_title="Crescent UniBot", page_icon="🎓")
 st.title("🎓 Crescent University Chatbot")
 st.markdown("Ask me anything about Crescent University!")
 
-# Personality selector
-selected_tone = st.sidebar.selectbox("Choose Tone Style", ["Friendly", "Professional", "Witty"], index=0)
+# --- Sidebar tone selector ---
+tone = st.sidebar.selectbox(
+    "Choose Assistant Personality",
+    list(TONE_PROMPTS.keys())
+)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
-
-# --- System prompt (tone-specific) ---
-def get_system_prompt(tone):
-    if tone == "Professional":
-        return "You are a formal university assistant. Provide factual, clear responses about Crescent University."
-    elif tone == "Witty":
-        return "You are a witty, smart assistant for Crescent University. Respond with humor but stay helpful and informative."
-    return "You are a helpful, friendly assistant for Crescent University. Answer in a conversational tone, like you're chatting with a student."
 
 # --- Handle new input ---
 if prompt := st.chat_input():
@@ -154,34 +146,34 @@ if prompt := st.chat_input():
         matched_answer = qa_data[top_hit['corpus_id']]['answer']
         similarity_score = top_hit['score']
 
+        system_prompt = TONE_PROMPTS.get(tone, TONE_PROMPTS["Friendly"])
+
         if similarity_score < 0.55:
             conversation_history.append({"role": "user", "content": prompt})
             response = openai.ChatCompletion.create(
                 model="gpt-4",
-                messages=[{"role": "system", "content": get_system_prompt(selected_tone)}] + conversation_history,
+                messages=[{"role": "system", "content": system_prompt}] + conversation_history,
                 temperature=0.7,
                 max_tokens=500,
                 stream=True
             )
-            streamed_text = ""
+            gpt_reply = ""
             with st.chat_message("assistant"):
                 message_placeholder = st.empty()
                 for chunk in response:
-                    if "content" in chunk.choices[0].delta:
-                        streamed_text += chunk.choices[0].delta.content
-                        message_placeholder.markdown(streamed_text)
-            conversation_history.append({"role": "assistant", "content": streamed_text})
-            final_answer = streamed_text
+                    if "choices" in chunk:
+                        delta = chunk.choices[0].delta.get("content", "")
+                        gpt_reply += delta
+                        message_placeholder.markdown(gpt_reply + "▌")
+                message_placeholder.markdown(gpt_reply)
+            conversation_history.append({"role": "assistant", "content": gpt_reply})
+            st.session_state.messages.append({"role": "assistant", "content": gpt_reply})
         else:
             final_answer = matched_answer
             conversation_history.append({"role": "user", "content": prompt})
             conversation_history.append({"role": "assistant", "content": final_answer})
+            st.chat_message("assistant").write(final_answer)
+            st.session_state.messages.append({"role": "assistant", "content": final_answer})
 
         if len(conversation_history) > 10:
             conversation_history = conversation_history[-10:]
-
-        human_response = add_human_tone(final_answer, tone=selected_tone)
-        if similarity_score >= 0.55:
-            st.chat_message("assistant").write(human_response)
-        st.session_state.messages.append({"role": "assistant", "content": human_response})
-
