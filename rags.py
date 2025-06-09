@@ -46,14 +46,8 @@ SYNONYMS = {
     "needed for": "required for", "who handles": "who manages"
 }
 
-SMALL_TALK = [
-    (re.compile(r"how are you", re.IGNORECASE), ["I'm great, thanks for asking! How can I assist you?", "Doing well! Let me know if you have any university-related questions."]),
-    (re.compile(r"who (are|r) you", re.IGNORECASE), ["I'm your Crescent University assistant bot! Ask me anything."]),
-    (re.compile(r"(what can you do|help me)", re.IGNORECASE), ["I can answer questions about departments, courses, fees, admissions, and more at Crescent University."])
-]
-
 ABUSE_WORDS = ["fuck", "shit", "bitch", "nigga", "dumb", "sex"]
-ABUSE_PATTERN = re.compile(r'\\b(' + '|'.join(map(re.escape, ABUSE_WORDS)) + r')\\b', re.IGNORECASE)
+ABUSE_PATTERN = re.compile(r'\b(' + '|'.join(map(re.escape, ABUSE_WORDS)) + r')\b', re.IGNORECASE)
 
 DEPARTMENT_NAMES = [d.lower() for d in [
     "Computer Science", "Mass Communication", "Law", "Microbiology",
@@ -95,9 +89,9 @@ def normalize_text(text, sym_spell):
     suggestions = sym_spell.lookup_compound(text, max_edit_distance=2)
     corrected = suggestions[0].term if suggestions else text
     for abbr, full in ABBREVIATIONS.items():
-        corrected = re.sub(rf'\\b{re.escape(abbr)}\\b', full, corrected)
+        corrected = re.sub(rf'\b{re.escape(abbr)}\b', full, corrected)
     for syn, rep in SYNONYMS.items():
-        corrected = re.sub(rf'\\b{re.escape(syn)}\\b', rep, corrected)
+        corrected = re.sub(rf'\b{re.escape(syn)}\b', rep, corrected)
     return corrected
 
 # --- Greetings / Farewell ---
@@ -106,11 +100,11 @@ def is_greeting(text):
 
 def get_random_greeting_response():
     return random.choice([
-        "Hello! How can I assist you today?",
-        "Hi there! What can I help you with?",
-        "Hey! Feel free to ask me anything about Crescent University.",
-        "Greetings! How may I be of service?",
-        "Hello! Ready to help you with any questions."
+        "Hey there! How can I help you today?",
+        "Hi! Need help with something about Crescent University?",
+        "Hello! Feel free to ask me anything you’re curious about.",
+        "Hi there! I’m here to help you out.",
+        "Hey! What would you like to know today?"
     ])
 
 def is_farewell(text):
@@ -118,46 +112,60 @@ def is_farewell(text):
 
 def get_random_farewell_response():
     return random.choice([
-        "Goodbye! Have a great day!",
-        "See you later! Feel free to come back anytime.",
-        "Bye! Take care!",
-        "Farewell! Let me know if you need anything else.",
-        "Peace out! Hope to chat again soon."
+        "Alright, take care!",
+        "See you around! Have a good one.",
+        "Bye for now! Let me know if you need more help later.",
+        "Catch you later! Feel free to come back any time.",
+        "Take care! I’ll be here whenever you need me."
     ])
 
 # --- Memory ---
 def update_chat_memory(norm_input, memory):
     for dept in DEPARTMENT_NAMES:
-        if re.search(rf"\\b{re.escape(dept)}\\b", norm_input):
+        if re.search(rf"\b{re.escape(dept)}\b", norm_input):
             memory["department"] = dept.title()
             break
     dep_match = re.search(r"department of ([a-zA-Z &]+)", norm_input)
     if dep_match:
         memory["department"] = dep_match.group(1).title()
-    lvl_match = re.search(r"(100|200|300|400|500)\\s*level", norm_input)
+    lvl_match = re.search(r"(100|200|300|400|500)\s*level", norm_input)
     if lvl_match:
         memory["level"] = lvl_match.group(1)
+    topics = [
+        ("admission", ["admission", "apply", "jamb", "requirement"]),
+        ("fees", ["fee", "tuition", "cost", "school fees"]),
+        ("courses", ["course", "subject", "unit", "curriculum", "study"]),
+        ("accommodation", ["accommodation", "hostel", "reside", "lodging"]),
+        ("graduation", ["graduation", "convocation"]),
+        ("exam", ["exam", "test", "cgpa", "grade"]),
+        ("scholarship", ["scholarship", "aid", "bursary"]),
+        ("dress code", ["dress code", "uniform", "appearance"])
+    ]
+    for topic, kws in topics:
+        if any(kw in norm_input for kw in kws):
+            memory["topic"] = topic
+            break
     return memory
 
 def resolve_follow_up(raw_input, memory):
     text = raw_input.strip().lower()
-    if m := re.match(r"what about (\\d{3}) level", text):
+    if m := re.match(r"what about (\d{3}) level", text):
         if memory.get("department"):
             return f"What are the {m.group(1)} level courses in {memory['department']}?"
     if text.startswith("what about") and memory.get("level") and memory.get("department"):
         return f"What are the {memory['level']} level courses in {memory['department']}?"
-    if m2 := re.match(r"do they also .* in ([a-zA-Z &]+)\\?", text):
+    if m2 := re.match(r"do they also .* in ([a-zA-Z &]+)\?", text):
         if memory.get("topic"):
             return f"Do they also offer {memory['topic']} in {m2.group(1).title()}?"
-    if m3 := re.match(r"how about .* for ([a-zA-Z &]+)\\?", text):
+    if m3 := re.match(r"how about .* for ([a-zA-Z &]+)\?", text):
         if memory.get("topic"):
             return f"Do they also offer {memory['topic']} in {m3.group(1).title()}?"
     return raw_input
 
 # --- Retrieval / GPT Fallback ---
 def build_contextual_prompt(messages, memory):
-    mem = f"- Department: {memory.get('department') or 'unspecified'}\\n- Level: {memory.get('level') or 'unspecified'}\\n- Topic: {memory.get('topic') or 'unspecified'}"
-    return [{"role": "system", "content": "You are a helpful assistant for Crescent University.\\n" + mem}] + messages[-12:]
+    mem = f"- Department: {memory.get('department') or 'unspecified'}\n- Level: {memory.get('level') or 'unspecified'}\n- Topic: {memory.get('topic') or 'unspecified'}"
+    return [{"role": "system", "content": "You are a friendly and helpful assistant for Crescent University. Respond like you're talking to a friend.\n" + mem}] + messages[-12:]
 
 def retrieve_or_gpt(user_input, dataset, q_embeds, embed_model, messages, memory):
     for item in dataset:
@@ -176,12 +184,12 @@ def retrieve_or_gpt(user_input, dataset, q_embeds, embed_model, messages, memory
             gpt_response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=prompt,
-                temperature=0.4,
+                temperature=0.6,
             )
-            return gpt_response.choices[0].message.content, top_score
+            return gpt_response.choices[0].message.content.strip(), top_score
         except:
-            return "Sorry, I couldn’t fetch a proper response right now.", top_score
-    return "I’m not sure what you mean. Could you try rephrasing?", top_score
+            return "Hmm, I had trouble finding the answer. Want to try rephrasing that?", top_score
+    return "I’m not quite sure what you mean. Could you try asking in a different way?", top_score
 
 # --- Logging ---
 def log_to_long_term_memory(user_input, assistant_response):
@@ -194,7 +202,7 @@ def log_to_long_term_memory(user_input, assistant_response):
 def main():
     st.set_page_config(page_title="Crescent University Chatbot", page_icon="🎓")
     st.title("🎓 Crescent University Chatbot")
-    st.markdown("Ask me anything about your department, courses, or the university.")
+    st.markdown("Ask me anything about your department, courses, or life at the university.")
 
     if "embed_model" not in st.session_state:
         embed_model, sym_spell, dataset, q_embeds = load_all_data()
@@ -202,31 +210,26 @@ def main():
         st.session_state.sym_spell = sym_spell
         st.session_state.dataset = dataset
         st.session_state.q_embeds = q_embeds
-        st.session_state.messages = [{"role": "assistant", "content": "Hello! I'm your Crescent University assistant. Ask me anything!"}]
+        st.session_state.messages = [{"role": "assistant", "content": "Hi there! I'm here to help you with anything Crescent University related. What would you like to know?"}]
         st.session_state.memory = {"department": None, "topic": None, "level": None}
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    user_input = st.chat_input("Type your question here...")
+    user_input = st.chat_input("What's on your mind?")
     if user_input:
         norm_input = normalize_text(user_input, st.session_state.sym_spell)
         if ABUSE_PATTERN.search(norm_input):
-            response = "Sorry, I can’t help with that."
+            response = "Let’s keep it respectful, please. I’m here to help."
         elif is_greeting(norm_input):
             response = get_random_greeting_response()
         elif is_farewell(norm_input):
             response = get_random_farewell_response()
         else:
-            for pattern, replies in SMALL_TALK:
-                if pattern.search(norm_input):
-                    response = random.choice(replies)
-                    break
-            else:
-                st.session_state.memory = update_chat_memory(norm_input, st.session_state.memory)
-                resolved_input = resolve_follow_up(user_input, st.session_state.memory)
-                response, _ = retrieve_or_gpt(resolved_input, st.session_state.dataset, st.session_state.q_embeds, st.session_state.embed_model, st.session_state.messages, st.session_state.memory)
+            st.session_state.memory = update_chat_memory(norm_input, st.session_state.memory)
+            resolved_input = resolve_follow_up(user_input, st.session_state.memory)
+            response, _ = retrieve_or_gpt(resolved_input, st.session_state.dataset, st.session_state.q_embeds, st.session_state.embed_model, st.session_state.messages, st.session_state.memory)
         st.chat_message("user").markdown(user_input)
         with st.chat_message("assistant"):
             placeholder = st.empty()
