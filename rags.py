@@ -2,166 +2,171 @@
 import streamlit as st
 import re
 import json
-import time
-from symspellpy.symspellpy import SymSpell
+import random
+import torch
 from sentence_transformers import SentenceTransformer, util
+from symspellpy.symspellpy import SymSpell
+import pkg_resources
 import openai
+import os
 
-# Load SymSpell for spell correction (only once)
-sym_spell = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
-dictionary_path = "frequency_dictionary_en_82_765.txt"
-sym_spell.load_dictionary(dictionary_path, term_index=0, count_index=1)
+# --- Page Setup ---
+st.set_page_config(page_title="Crescent University Chatbot", layout="centered")
+st.title("🎓 Crescent University Chatbot")
 
-# Load SentenceTransformer model (only once)
-embedder = SentenceTransformer('multi-qa-MiniLM-L6-cos-v1')
-
-# Load QA dataset (only once)
-with open("qa_dataset.json", "r", encoding="utf-8") as f:
-    qa_data = json.load(f)
-
-# Prepare corpus and embeddings (only once)
-corpus = [entry["question"] for entry in qa_data]
-corpus_embeddings = embedder.encode(corpus, convert_to_tensor=True)
-
-# OpenAI API key from secrets
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-
-# Initialize conversation history for fallback GPT
-conversation_history = []
-
-# --- Preprocessing dicts ---
+# --- Normalization Dictionaries ---
 ABBREVIATIONS = {
     "u": "you", "r": "are", "ur": "your", "cn": "can", "cud": "could",
-    "shud": "should", "wud": "would", "abt": "about", "bcz": "because",
-    "plz": "please", "pls": "please", "tmrw": "tomorrow", "wat": "what",
-    "wats": "what is", "info": "information", "yr": "year", "sem": "semester",
-    "admsn": "admission", "clg": "college", "sch": "school", "uni": "university",
-    "cresnt": "crescent", "l": "level", "d": "the", "msg": "message",
-    "idk": "i don't know", "imo": "in my opinion", "asap": "as soon as possible",
-    "dept": "department", "reg": "registration", "fee": "fees", "pg": "postgraduate",
-    "app": "application", "req": "requirement", "nd": "national diploma",
-    "a-level": "advanced level", "alevel": "advanced level", "2nd": "second",
-    "1st": "first", "nxt": "next", "prev": "previous", "exp": "experience",
-    "csc": "department of computer science", "mass comm": "department of mass communication",
-    "law": "department of law", "acc": "department of accounting"
+    "abt": "about", "b4": "before", "info": "information"
 }
 
 SYNONYMS = {
-    "lecturers": "academic staff", "professors": "academic staff",
-    "teachers": "academic staff", "instructors": "academic staff",
-    "tutors": "academic staff", "staff members": "staff",
-    "head": "dean", "hod": "head of department", "dept": "department",
-    "school": "university", "college": "faculty", "course": "subject",
-    "class": "course", "subject": "course", "unit": "credit",
-    "credit unit": "unit", "course load": "unit", "non teaching": "non-academic",
-    "admin worker": "non-academic staff", "support staff": "non-academic staff",
-    "clerk": "non-academic staff", "receptionist": "non-academic staff",
-    "secretary": "non-academic staff", "tech staff": "technical staff",
-    "hostel": "accommodation", "lodging": "accommodation", "room": "accommodation",
-    "school fees": "tuition", "acceptance fee": "admission fee", "fees": "tuition",
-    "enrol": "apply", "join": "apply", "sign up": "apply", "admit": "apply",
-    "requirement": "criteria", "conditions": "criteria", "needed": "required",
-    "needed for": "required for", "who handles": "who manages"
+    "it people": "technical staff",
+    "office staff": "non-academic staff",
+    "lecturers": "academic staff",
+    "school fees": "tuition"
 }
 
-# --- Preprocessing function ---
-def preprocess_text(text):
-    text = text.strip()
-
-    # Skip spellcheck for short inputs (speed up)
-    if len(text.split()) >= 4:
-        suggestions = sym_spell.lookup_compound(text, max_edit_distance=2)
-        if suggestions:
-            text = suggestions[0].term
-
-    # Replace abbreviations
-    for abbr, full in ABBREVIATIONS.items():
-        text = re.sub(rf"\\b{abbr}\\b", full, text, flags=re.IGNORECASE)
-
-    # Replace synonyms
-    for word, synonym in SYNONYMS.items():
-        text = re.sub(rf"\\b{word}\\b", synonym, text, flags=re.IGNORECASE)
-
+# --- Normalization Functions ---
+def normalize_text(text):
+    text = text.lower()
+    for k, v in ABBREVIATIONS.items():
+        text = re.sub(rf"\b{k}\b", v, text)
+    for k, v in SYNONYMS.items():
+        text = re.sub(rf"\b{k}\b", v, text)
     return text
 
-# --- Friendly tone control ---
-def add_human_tone(raw_response):
-    friendly_prefix = "Of course! 😊 "
-    if raw_response.lower().startswith("sorry") or "i don't know" in raw_response.lower():
-        return "Hmm, let me double-check that for you. 🤔"
-    return friendly_prefix + raw_response
+def load_symspell():
+    sym_spell = SymSpell(max_dictionary_edit_distance=2)
+    dictionary_path = pkg_resources.resource_filename("symspellpy", "frequency_dictionary_en_82_765.txt")
+    sym_spell.load_dictionary(dictionary_path, term_index=0, count_index=1)
+    return sym_spell
 
-# --- Small talk / acknowledgment ---
-def detect_smalltalk_or_acknowledge(user_input):
-    input_lower = user_input.lower()
-    if "thank" in input_lower:
-        return "You're welcome! Let me know if you have more questions. 😊"
-    if "hello" in input_lower or "hi" in input_lower:
-        return "Hi there! I'm here to help with anything about Crescent University. What would you like to know?"
-    if "not asked" in input_lower:
-        return "Alright, take your time! I'm ready whenever you are. 😊"
+def correct_text(sym_spell, input_text):
+    suggestions = sym_spell.lookup_compound(input_text, max_edit_distance=2)
+    return suggestions[0].term if suggestions else input_text
+
+# --- Load Dataset and Embed ---
+def load_data_and_embed(model, path="qa_data.json"):
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    questions = [item["question"] for item in data]
+    embeddings = model.encode(questions, convert_to_tensor=True)
+    return data, embeddings
+
+# --- Setup Resources ---
+@st.cache_resource()
+def setup():
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    sym_spell = load_symspell()
+    data, embeddings = load_data_and_embed(model)
+    return model, sym_spell, data, embeddings
+
+model, sym_spell, qa_data, qa_embeddings = setup()
+
+# --- OpenAI Key (Replace or use Streamlit secrets) ---
+openai.api_key = st.secrets["OPENAI_API_KEY"] if "OPENAI_API_KEY" in st.secrets else "sk-..."
+
+# --- Memory State ---
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# --- Greeting Detection ---
+def is_greeting(text):
+    greetings = ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]
+    return any(greet in text.lower() for greet in greetings)
+
+def get_greeting_response():
+    return random.choice([
+        "Hello! 👋 How can I help you today?",
+        "Hi there! Ask me anything about Crescent University 😊",
+        "Welcome! What would you like to know about CUAB?"
+    ])
+
+# --- Small Talk Handler ---
+def handle_small_talk(text):
+    triggers = {
+        "how are you": "I'm doing great, thanks for asking! 😊 How can I assist you?",
+        "thank you": "You're welcome! Let me know if there's anything else.",
+        "thanks": "Glad I could help!",
+        "who are you": "I'm your Crescent University assistant, here to help!"
+    }
+    for k, v in triggers.items():
+        if k in text.lower():
+            return v
     return None
 
-# --- Streamlit UI setup ---
-st.set_page_config(page_title="Crescent UniBot", page_icon="🎓")
-st.title("🎓 Crescent University Chatbot")
-st.markdown("Ask me anything about Crescent University!")
+# --- Follow-up Handler ---
+def resolve_follow_up(current_input):
+    if any(x in current_input.lower() for x in ["what about", "how about", "and the"]):
+        if st.session_state.chat_history:
+            last_topic = st.session_state.chat_history[-1]["user"]
+            return f"{last_topic} {current_input}"
+    return current_input
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# --- Save to Memory ---
+def store_in_history(user_q, bot_a):
+    st.session_state.chat_history.append({"user": user_q, "bot": bot_a})
 
-# Render previous messages
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+def save_to_log(user, query):
+    with open("chat_log.json", "a", encoding="utf-8") as f:
+        json.dump({"user": user, "query": query}, f)
+        f.write("\n")
 
-# --- System prompt for GPT fallback ---
-system_prompt = """
-You are a helpful, friendly assistant for Crescent University.
-Answer in a conversational tone, like you're chatting with a student.
-If the user is confused, be patient. If they greet you, respond warmly.
-Always encourage them to ask more if needed.
-"""
+# --- Friendly Wrap ---
+def friendly_wrap(response):
+    return f"🙂 {response}" if not response.lower().startswith("sorry") else response
 
-# --- Handle new input ---
-if prompt := st.chat_input():
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
-
-    friendly_reply = detect_smalltalk_or_acknowledge(prompt)
-    if friendly_reply:
-        st.chat_message("assistant").write(friendly_reply)
-        st.session_state.messages.append({"role": "assistant", "content": friendly_reply})
+# --- Search Logic ---
+def search_answer(user_query, threshold=0.65):
+    norm = normalize_text(user_query)
+    corrected = correct_text(sym_spell, norm)
+    user_embedding = model.encode(corrected, convert_to_tensor=True)
+    similarity_scores = util.cos_sim(user_embedding, qa_embeddings)[0]
+    best_idx = torch.argmax(similarity_scores).item()
+    best_score = similarity_scores[best_idx].item()
+    if best_score > threshold:
+        return qa_data[best_idx]["answer"]
     else:
-        processed_prompt = preprocess_text(prompt)
+        return None
 
-        query_embedding = embedder.encode(processed_prompt, convert_to_tensor=True)
-        hits = util.semantic_search(query_embedding, corpus_embeddings, top_k=3)
-        top_hit = hits[0][0]
-        matched_answer = qa_data[top_hit['corpus_id']]['answer']
-        similarity_score = top_hit['score']
+# --- GPT Fallback ---
+def get_gpt_answer(prompt):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception:
+        return "Sorry, GPT is currently unavailable."
 
-        if similarity_score < 0.45:  # fallback threshold reduced for speed & accuracy
-            conversation_history.append({"role": "user", "content": prompt})
+# --- Streamlit UI ---
+user_input = st.text_input("Ask me anything about Crescent University 🏫", key="input")
 
-            with st.spinner("Thinking... 🤔"):
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",  # Faster fallback model
-                    messages=[{"role": "system", "content": system_prompt}] + conversation_history,
-                    temperature=0.7,
-                    max_tokens=500
-                )
-            gpt_reply = response.choices[0].message.content
-            conversation_history.append({"role": "assistant", "content": gpt_reply})
-            final_answer = gpt_reply
+if user_input:
+    if is_greeting(user_input):
+        greeting = get_greeting_response()
+        st.success(greeting)
+        store_in_history(user_input, greeting)
+        save_to_log("anonymous", user_input)
+    else:
+        small_talk = handle_small_talk(user_input)
+        if small_talk:
+            st.info(small_talk)
+            store_in_history(user_input, small_talk)
+            save_to_log("anonymous", user_input)
         else:
-            final_answer = matched_answer
-            conversation_history.append({"role": "user", "content": prompt})
-            conversation_history.append({"role": "assistant", "content": final_answer})
-
-        # Limit conversation history size for memory/performance
-        if len(conversation_history) > 6:
-            conversation_history = conversation_history[-6:]
-
-        human_response = add_human_tone(final_answer)
-        st.chat_message("assistant").write(human_response)
-        st.session_state.messages.append({"role": "assistant", "content": human_response})
+            resolved_input = resolve_follow_up(user_input)
+            with st.spinner("Thinking..."):
+                answer = search_answer(resolved_input)
+                if answer:
+                    wrapped = friendly_wrap(answer)
+                    st.success(wrapped)
+                    store_in_history(user_input, wrapped)
+                    save_to_log("anonymous", user_input)
+                else:
+                    gpt_reply = get_gpt_answer(resolved_input)
+                    st.info(gpt_reply)
+                    store_in_history(user_input, gpt_reply)
+                    save_to_log("anonymous", user_input)
