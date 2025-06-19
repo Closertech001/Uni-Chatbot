@@ -1,4 +1,4 @@
-# crescent_chatbot.py
+# crescent_chatbot.py (Humanlike Chatbot with Memory, Personality, Emotion)
 
 import streamlit as st
 import re
@@ -63,9 +63,9 @@ SYNONYMS = {"lecturers": "academic staff", "professors": "academic staff", "teac
 def normalize_text(text):
     text = text.lower()
     for abbr, full in ABBREVIATIONS.items():
-        text = re.sub(rf"\\b{abbr}\\b", full, text)
+        text = re.sub(rf"\b{abbr}\b", full, text)
     for word, synonym in SYNONYMS.items():
-        text = re.sub(rf"\\b{word}\\b", synonym, text)
+        text = re.sub(rf"\b{word}\b", synonym, text)
     return text
 
 def correct_text(text):
@@ -88,16 +88,16 @@ def search_answer(query, threshold=0.65):
 def get_gpt_answer(user_prompt):
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a helpful, friendly university assistant."},
+                {"role": "system", "content": "You are a warm, helpful assistant that talks casually and clearly like a human. You answer thoughtfully, use small talk when needed, and ask clarifying questions if unsure."},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.7, max_tokens=500
+            temperature=0.7, top_p=0.9, max_tokens=500
         )
         return response.choices[0].message.content.strip()
     except Exception:
-        return "Sorry, I'm unable to fetch that right now."
+        return "Sorry, GPT is currently unavailable."
 
 # --- User Profile ---
 def load_user_profile():
@@ -199,3 +199,9 @@ if prompt := st.chat_input("Ask me anything about Crescent University 🏫"):
     st.chat_message("assistant").write(response)
     st.session_state.messages.append({"role": "assistant", "content": response})
     save_user_memory(user_id, prompt, response)
+
+# --- Sidebar: Profile ---
+with st.sidebar:
+    st.markdown("👤 **User Profile**")
+    user_profile = load_user_profile()
+    st.write(user_profile)
