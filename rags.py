@@ -199,9 +199,3 @@ if prompt := st.chat_input("Ask me anything about Crescent University 🏫"):
     st.chat_message("assistant").write(response)
     st.session_state.messages.append({"role": "assistant", "content": response})
     save_user_memory(user_id, prompt, response)
-
-# --- Sidebar: Profile ---
-with st.sidebar:
-    st.markdown("👤 **User Profile**")
-    user_profile = load_user_profile()  # 🔥 Add this line to avoid NameError
-    st.write(user_profile)
